@@ -50,7 +50,7 @@ The output price is chosen separately from the input price, so a step can set on
 | `systemone`, `openai-compatible` | Matching model hint's `price_per_m_output`, if set                                                                                                                                                                                                                                                                                      |
 | Anything else                    | No output price                                                                                                                                                                                                                                                                                                                         |
 
-Model hints take `price_per_m_output` beside `price_per_m_input`. The models endpoint lists `price_per_m_output` (catalog or hint) and `default_price_per_m_output` (what a decision is charged when the step sets none), using the same rules and cached catalog as decisions. Listings and charges therefore agree.
+Model hints take `price_per_m_output` beside `price_per_m_input`. The models endpoint lists `price_per_m_output` (catalog or hint) and `default_price_per_m_output` (what a decision is charged when the step sets none), using the same rules and cached catalog as decisions. Listings and decision execution therefore use the same default rates.
 
 ## Count tokens and calculate
 

@@ -36,7 +36,7 @@ Make a decision first so the log has an entry. With `ADMIN_TOKEN` set, this scri
 | `cost_usd`, `cost_basis`, `cost_includes_output`, `tokens` | Cost information for the answering attempt (see [Cost](/docs/reference/decisions#cost)). All four are `null` on failure and on entries predating cost tracking. `cost_includes_output` is also `null` on entries predating output pricing. |
 | `request`, `response`                                      | Captured payloads, present only when `settings.capture_payloads` was enabled at the time.                                                                                                                                                  |
 
-For answered requests `cost_basis` is one of `upstream_cost`, `upstream_tokens`, `estimated_tokens` or `unpriced`; `cost_usd` may be `null`. `cost_includes_output` may be true, false or null, and `tokens` may be null. Historical `free` log rows read as `unpriced`, retaining their recorded cost of 0 and output flag; they count as unpriced in statistics without changing stored rows.
+For answered requests `cost_basis` is one of `upstream_cost`, `upstream_tokens`, `estimated_tokens` or `unpriced`; `cost_usd` may be `null`. `cost_includes_output` may be true, false or null, and `tokens` may be null. Historical `free` log rows read as `unpriced`, with their recorded cost of 0 and output flag preserved. They count as unpriced in statistics; the stored rows do not change.
 
 ## Stats
 
