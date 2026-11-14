@@ -8,6 +8,10 @@ Decision models, such as Jev, give your code an answer it can use directly: a ca
 
 Your app calls a single API, and you choose the providers and models behind it. You can switch models without changing your application code.
 
+![dgateway console overview showing request charts, provider health, and model routes](.github/assets/console-overview.png)
+
+*Console overview with demo data.*
+
 ## Try it
 
 Start the container. Before you use it beyond a local trial, replace the `ADMIN_TOKEN` and `GATEWAY_SECRET` values with two different long random strings. Keep `GATEWAY_SECRET` the same over time: it encrypts the provider keys you store.
