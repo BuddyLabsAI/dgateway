@@ -3,11 +3,13 @@ title: Providers and wires
 description: Connect a provider and verify it with a known-answer check.
 ---
 
-dgateway can call a model server on your own machine as well as hosted providers. The console has presets for OpenAI, OpenRouter, TypeSafe (whose model is Jev), Baseten, Liquid, Perplexity and DeepInfra, and for Ollama and vLLM on your machine. Chat presets for OpenAI, OpenRouter and any OpenAI-compatible server let chat models answer decision questions too.
+dgateway can call a model server on your own machine as well as hosted providers. The console has presets for OpenAI, OpenRouter, TypeSafe (whose model is Jev), Baseten, Liquid, Perplexity and DeepInfra, and for Ollama and vLLM on your machine. Chat presets for OpenAI, OpenRouter and OpenAI-compatible chat servers let chat models answer decision questions too. Compatibility depends on the model and host; run a known-answer test before routing requests to one.
 
 ## Seeded providers and presets
 
 A new install starts with `mock`, `openai` and `openrouter` turned on. It also has providers that are turned off: `llamacpp`, which points to `http://host.docker.internal:8080` with the path `/v1/systemone`, for a server on your machine, and [`typesafe`](/docs/guides/typesafe) for TypeSafe's Jev models. SystemOne is the decision API that TypeSafe defined. A wire is the request and response format a provider uses; the `map` wire below speaks SystemOne.
+
+The native local presets need a decision-capable model and the matching endpoint. **Ollama (local)** uses `/v1/systemone` with `d1`; **vLLM (local)** uses `/v1/decisions`. The seeded `llamacpp` provider expects SystemOne at `/v1/systemone`. A server with only a chat endpoint needs a separate connection from **Any OpenAI-compatible chat model (synthetic)**, with a compatible model and host. Test that connection before using it in a route.
 
 Local llama.cpp and Ollama servers have no default price. Add model hint prices or step prices to track their costs, unless the upstream reports a billed amount.
 

@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/BuddyLabsAI/dgateway/actions/workflows/ci.yml/badge.svg)](https://github.com/BuddyLabsAI/dgateway/actions/workflows/ci.yml) [![GHCR](https://img.shields.io/badge/GHCR-dgateway-blue)](https://github.com/BuddyLabsAI/dgateway/pkgs/container/dgateway) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Unified self-hosted API gateway for decision models.**
+⚡ A unified, self-hosted AI gateway for classifications, yes/no answers, and scores. Works with OpenAI, OpenRouter, TypeSafe, Ollama, vLLM, and more through a single API.
 
 Decision models, such as Jev, give your code an answer it can use directly: a category, a yes or no, or a score. OpenAI offers them through its Decisions API.
 
-With dgateway, your app calls a single API, and you choose any model behind it: OpenAI, OpenRouter, TypeSafe, another hosted vendor, or one on your own machine. You can switch models without changing your code.
+Your app calls a single API, and you choose the providers and models behind it. You can switch models without changing your application code.
 
 ## Try it
 
@@ -22,7 +22,13 @@ docker run -d --name dgateway \
   ghcr.io/buddylabsai/dgateway:latest
 ```
 
-Your app names a route in the `model` field, and the route decides which models answer. A new install has a test route named `default`. It answers with a built-in mock instead of a real model, so you need no API key. Ask it three questions about a support ticket in one request:
+To connect real models, open the console at [http://127.0.0.1:8790/](http://127.0.0.1:8790/) and sign in with the admin token. On **Providers**, add or configure a provider, run **Test** with your chosen model, and turn the provider on. On **Models**, create a route with a step for that provider and model. Send the route name in your request's `model` field. [Provider setup and compatibility](https://buddylabsai.github.io/dgateway/docs/guides/providers/)
+
+Your app names a route in the `model` field, and the route decides which models answer. A new install has a test route named `default`. It answers with a built-in mock instead of a real model, so you need no API key.
+
+The mock does not read the text. It takes its numbers from a hash of the input, so it shows the response format, not model quality.
+
+Ask it three questions about a support ticket in one request:
 
 Example Request
 
@@ -62,7 +68,8 @@ curl http://127.0.0.1:8790/v1/decisions \
   }'
 ```
 
-Example Response
+<details>
+<summary>Example response</summary>
 
 ```json
 {
@@ -120,16 +127,14 @@ Example Response
 }
 ```
 
+</details>
+
 How to read it:
 
 - `choice` is the most likely team. `probabilities` gives the probability of each team.
 - The yes/no question returns `probability`, the chance that the answer is yes.
 - `score` is the expected level: 0 is low and 2 is high. It is the sum of each level number times its probability.
 - `gateway` names the provider and model that answered, lists each attempt and gives the cost in US dollars.
-
-The mock does not read the text. It takes its numbers from a hash of the input, so it shows the response format, not model quality.
-
-To connect real models, open the console at [http://127.0.0.1:8790/](http://127.0.0.1:8790/) and sign in with the admin token. There you can add providers, test them and choose which ones answer each route.
 
 ## Other ways to run it
 
@@ -222,11 +227,13 @@ The cost belongs to the attempt that answered. dgateway assigns no cost to faile
 
 ## Providers
 
-The console has presets for OpenAI, OpenRouter, TypeSafe (whose model is Jev), Baseten, Liquid, Perplexity and DeepInfra. Chat presets for OpenAI, OpenRouter and any OpenAI-compatible server let chat models answer decision questions too. The TypeSafe, Baseten, Liquid, Perplexity and DeepInfra presets come from each vendor's public docs. Like the chat presets, they show "Not verified yet" until a provider made from one passes a test with a live key. A new install also has a `typesafe` provider, turned off. [Providers](https://buddylabsai.github.io/dgateway/docs/guides/providers/)
+The console has presets for OpenAI, OpenRouter, TypeSafe (whose model is Jev), Baseten, Liquid, Perplexity and DeepInfra. Chat presets for OpenAI, OpenRouter and OpenAI-compatible chat servers let chat models answer decision questions too. Compatibility depends on the model and host; test your chosen model before using it in a route. The TypeSafe, Baseten, Liquid, Perplexity and DeepInfra presets come from each vendor's public docs. Like the chat presets, they show "Not verified yet" until a provider made from one passes a test with a live key. A new install also has a `typesafe` provider, turned off. [Providers](https://buddylabsai.github.io/dgateway/docs/guides/providers/)
 
 ## Local models
 
 dgateway can call a model server on your own machine as well as hosted providers. The console has presets for Ollama and vLLM. A new install also has a `llamacpp` provider, turned off, that points to `http://host.docker.internal:8080` with the path `/v1/systemone`.
+
+These native connections need a decision-capable model and the matching endpoint: Ollama uses `/v1/systemone` with `d1`, vLLM uses `/v1/decisions`, and the seeded `llamacpp` connection expects SystemOne at `/v1/systemone`. A chat-only server needs a separate compatible chat connection using the **Any OpenAI-compatible chat model (synthetic)** preset. Synthetic compatibility depends on the model and host; test it before routing requests to it.
 
 To keep a task on your machine, give its route only local steps. For example, turn on `llamacpp`, set its address to your server, and create this route in the console:
 

@@ -109,7 +109,7 @@ A hint can contain these fields:
 | `context`                                 | Optional positive integer context size.                                                           |
 | `description`                             | Optional string description.                                                                      |
 
-A provider can have up to 200 hints. Unknown hint fields are rejected. Hints appear in discovery results for SystemOne, OpenAI-compatible and chat connections. They also set default prices for OpenAI-compatible and hosted SystemOne models, and for OpenAI models missing from the built-in price table; see [Cost](/docs/guides/cost).
+A provider can have up to 200 hints. Unknown hint fields are rejected. Hints appear in discovery results for SystemOne, OpenAI-compatible and chat connections. They also set default prices for OpenAI-compatible models, local and hosted SystemOne models, and OpenAI models missing from the built-in price table; see [Cost](/docs/guides/cost).
 
 `test_model` is the model a provider test uses when the test names no model and no route targets the provider. Its value must be a nonblank string no longer than 200 characters, or `null` to have no saved choice. The default is null; PATCH with null clears it. Presets are a console feature rather than a gateway concept: when creating a connection, the console can save its preset's suggested test model. Examples are `perplexity/pplx-decider-flash-v1.2` for OpenRouter, `gpt-6-luna` for OpenAI and `d1` for Ollama. A SystemOne vendor preset suggests its cheapest hint whose model ID and price the vendor documents; a preset with no such hint suggests no test model. You can edit that setting under **Advanced**.
 
@@ -152,15 +152,15 @@ Catalog prices and gateway defaults serve different purposes. All four price fie
 - `price_per_m_input` and `price_per_m_output` describe the catalog or hint. They appear only when a price is available. OpenRouter's `pricing.prompt` and `pricing.completion` are converted from per-token amounts.
 - `default_price_per_m_input` and `default_price_per_m_output` describe the rates used to calculate a decision's cost when its route target has no explicit override and the upstream reports no billed cost. Unknown defaults are omitted.
 
-| Kind or model                         | Default input rate       | Default output rate                                      |
-| ------------------------------------- | ------------------------ | -------------------------------------------------------- |
-| Mock or local SystemOne               | 0                        | 0                                                        |
-| OpenAI `gpt-6-luna`                   | 0.10                     | 0 on the native `openai` and `map` wires; 0.50 on `chat` |
-| Other OpenAI model                    | Matching hint, if priced | Matching hint, if priced                                 |
-| OpenRouter                            | Catalog input price      | Catalog completion price                                 |
-| Hosted SystemOne or OpenAI-compatible | Matching hint, if priced | Matching hint, if priced                                 |
+| Kind or model                                   | Default input rate       | Default output rate                                      |
+| ----------------------------------------------- | ------------------------ | -------------------------------------------------------- |
+| Mock                                            | 0                        | 0                                                        |
+| OpenAI `gpt-6-luna`                             | 0.10                     | 0 on the native `openai` and `map` wires; 0.50 on `chat` |
+| Other OpenAI model                              | Matching hint, if priced | Matching hint, if priced                                 |
+| OpenRouter                                      | Catalog input price      | Catalog completion price                                 |
+| Local or hosted SystemOne, or OpenAI-compatible | Matching hint, if priced | Matching hint, if priced                                 |
 
-For example, an unhinted OpenAI-compatible model has neither default price. The listing computes each default from the provider settings and the cached catalog, through the same function a decision calls, so the first listing, every later listing and the charge on a decision all agree. A hint price shown in `price_per_m_input` or `price_per_m_output` never becomes an OpenRouter default, because OpenRouter pricing reads only the catalog: a model named by a hint but missing from the catalog lists no default.
+For example, an unhinted OpenAI-compatible model has neither default price. The listing and decision execution compute defaults from the same provider settings and cached catalog, using the same function. Their default rates agree when those inputs are the same. A hint price shown in `price_per_m_input` or `price_per_m_output` never becomes an OpenRouter default, because OpenRouter pricing reads only the catalog: a model named by a hint but missing from the catalog lists no default.
 
 ## Provider test
 
@@ -248,7 +248,7 @@ The mock bypasses the network and always exercises the map parser, regardless of
 
 ### Chat configuration
 
-The `chat` wire works with any OpenAI-style Chat Completions endpoint. It is meant for the `openai`, `openrouter` and `openai-compatible` kinds. When you create a chat provider without `path` or `limits`, the gateway saves the defaults below. It saves the other settings only if you send them: reads leave them out, and each call applies the default.
+The `chat` wire sends requests in the OpenAI Chat Completions format. Compatibility depends on both the model and its serving host, so run a known-answer test. It is meant for the `openai`, `openrouter` and `openai-compatible` kinds. When you create a chat provider without `path` or `limits`, the gateway saves the defaults below. It saves the other settings only if you send them: reads leave them out, and each call applies the default.
 
 | Setting             | Default and validation                                                                                                                          |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |

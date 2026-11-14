@@ -11,17 +11,17 @@ export default function HomePage() {
         <div className="hero-copy">
           <h1 id="hero-title">
             <span className="hero-line" data-hero-line>
-              Unified self-hosted API gateway
+              A unified, self-hosted AI gateway
             </span>
             <br />
             <span className="hero-line" data-hero-line>
-              for decision models.
+              for decisions your code can use.
             </span>
           </h1>
           <div className="hero-aside">
             <p className="landing-lead">
-              Your app calls a single API, and you choose any model behind it. Switch models without
-              changing your code.
+              Get classifications, yes/no answers and scores through a single API. Switch models
+              without changing your application code.
             </p>
             <div className="landing-actions">
               <Link className="primary-link" href="/docs/guides/getting-started">
@@ -50,13 +50,16 @@ export default function HomePage() {
           </p>
         </div>
         <div className="explainer-choices">
-          <p>In the console, you choose the model behind the API:</p>
+          <p>
+            In the console, choose a native decision API or a compatible chat connection.
+            Compatibility depends on the model and host:
+          </p>
           <ul>
             <li>OpenAI</li>
             <li>OpenRouter</li>
             <li>TypeSafe</li>
             <li>Another hosted vendor</li>
-            <li>A model on your own machine</li>
+            <li>A model on your own machine via Ollama or vLLM</li>
           </ul>
         </div>
       </section>
@@ -131,9 +134,9 @@ export default function HomePage() {
           </h2>
           <p>
             Ask for a category, a yes or no, or a score. One response holds the answers, the token
-            usage and the cost. <code>confidence</code> is not proof that an answer is right. Test
-            your provider, model, instructions and thresholds on examples you have labelled yourself
-            before you rely on them.
+            usage and the cost when known. <code>confidence</code> is not proof that an answer is
+            right. Test your provider, model, instructions and thresholds on examples you have
+            labelled yourself before you rely on them.
           </p>
           <Link className="text-link" href="/docs">
             Read the introduction <ArrowRight aria-hidden="true" size={16} />

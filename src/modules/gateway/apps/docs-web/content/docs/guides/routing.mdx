@@ -26,7 +26,7 @@ alias: local-only
 1. provider: llamacpp    model: server-configured
 ```
 
-Send `"model": "local-only"`. If the local server fails, the request fails; it never goes to a hosted provider. Use a second route when you do want a hosted fallback. A SystemOne server that selects its own model can ignore the step's model; the seeded provider does not send it. For Ollama or vLLM, add its console preset and make that provider the only step instead. Both presets call a native decision endpoint, not a chat endpoint: Ollama uses SystemOne at `/v1/systemone` on port 11434, and vLLM uses the OpenAI decisions shape at `/v1/decisions` on port 8000.
+Send `"model": "local-only"`. If the local server fails, the request fails; it never goes to a hosted provider. Use a second route when you do want a hosted fallback. A SystemOne server that selects its own model can ignore the step's model; the seeded provider does not send it. For Ollama or vLLM, add its console preset and make that provider the only step instead. Both presets require a decision-capable model and a native decision endpoint: Ollama uses SystemOne at `/v1/systemone` on port 11434 with `d1`, and vLLM uses the OpenAI decisions shape at `/v1/decisions` on port 8000. If your server only has a chat endpoint, use a separate **Any OpenAI-compatible chat model (synthetic)** connection instead. Compatibility depends on the model and host; test the connection before adding it to a route.
 
 ## Fallback rules
 

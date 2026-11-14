@@ -21,7 +21,13 @@ docker run -d --name dgateway \
 
 Inside a container, `localhost` is the container itself. The `--add-host` line lets a container on Linux reach your machine as `host.docker.internal`, for example to call a model server there; Docker Desktop has this name already.
 
-Your app names a route in the `model` field, and the route decides which models answer. A new install has a test route named `default`. It answers with a built-in mock instead of a real model, so you need no API key. Ask it three questions about a support ticket in one request:
+To connect real models, open the console at [http://127.0.0.1:8790/](http://127.0.0.1:8790/) and sign in with the admin token. On **Providers**, add or configure a provider, run **Test** with your chosen model, and turn the provider on. On **Models**, create a route with a step for that provider and model. Send the route name in your request's `model` field. Calls to `/v1/decisions` need no key until you turn on client keys in settings. [Provider setup and compatibility](/docs/guides/providers)
+
+Your app names a route in the `model` field, and the route decides which models answer. A new install has a test route named `default`. It answers with a built-in mock instead of a real model, so you need no API key.
+
+The mock does not read the text. It takes its numbers from a hash of the input, so it shows the response format, not model quality.
+
+Ask it three questions about a support ticket in one request:
 
 ```sh
 curl http://127.0.0.1:8790/v1/decisions \
@@ -59,7 +65,8 @@ curl http://127.0.0.1:8790/v1/decisions \
   }'
 ```
 
-An actual response from the mock (ID, time and latencies vary):
+<details>
+<summary>Actual mock response (ID, time and latencies vary)</summary>
 
 ```json
 {
@@ -117,16 +124,14 @@ An actual response from the mock (ID, time and latencies vary):
 }
 ```
 
+</details>
+
 How to read it:
 
 - `choice` is the most likely team. `probabilities` gives the probability of each team.
 - The yes/no question returns `probability`, the chance that the answer is yes.
 - `score` is the expected level: 0 is low and 2 is high. It is the sum of each level number times its probability.
 - `gateway` names the provider and model that answered, lists each attempt and gives the cost in US dollars.
-
-The mock does not read the text. It takes its numbers from a hash of the input, so it shows the response format, not model quality.
-
-To connect real models, open the console at [http://127.0.0.1:8790/](http://127.0.0.1:8790/) and sign in with the admin token. There you can add providers, test them and choose which ones answer each route. Calls to `/v1/decisions` need no key until you turn on client keys in settings.
 
 ## Run with Docker Compose
 

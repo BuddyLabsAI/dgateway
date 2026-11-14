@@ -5,7 +5,8 @@ import './global.css';
 
 export const metadata: Metadata = {
   title: { default: 'dgateway documentation', template: '%s · dgateway' },
-  description: 'Unified self-hosted API gateway for decision models.',
+  description:
+    'A unified, self-hosted AI gateway for classifications, yes/no answers and scores. Connect OpenAI, OpenRouter, TypeSafe, Ollama, vLLM and other compatible providers through a single API.',
   icons: { icon: `${process.env.NEXT_PUBLIC_DOCS_BASE_PATH}/icon.svg` },
 };
 

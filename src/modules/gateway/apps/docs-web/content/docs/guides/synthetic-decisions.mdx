@@ -65,7 +65,7 @@ When every answered call supplies a valid `usage.cost`, those costs are summed a
 
 ## Reasoning models and cost
 
-A model can spend the small output budget on reasoning and return no content. The console's Advanced **Turn reasoning off** setting controls `disable_reasoning`. If you leave it unset, the gateway picks a value on each call: on for `openrouter`, and off for all other kinds, `openai` and `openai-compatible` included. A provider response shows the field only when you set it yourself.
+A model can spend the small output budget on reasoning and return no content. The console's Advanced **Turn reasoning off** setting controls `disable_reasoning`. If you leave it unset, the gateway resolves `disable_reasoning` on each call to true for `openrouter` and false for all other kinds, including `openai` and `openai-compatible`. A provider response shows the field only when you set it yourself.
 
 With the setting enabled, any chat call can carry the kind's off field: logprobs calls, sampling calls, the single-sample calls that top up a short `n` response, and JSON calls.
 
