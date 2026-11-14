@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.1](https://github.com/BuddyLabsAI/dgateway/compare/v0.1.0...v0.1.1) (2026-11-14)
+
+
+### Documentation
+
+* 📝 clarify gateway positioning and setup ([c2a056c](https://github.com/BuddyLabsAI/dgateway/commit/c2a056c1ae0ac9396d60825e727856143062efaa))
+* 📝 clarify gateway positioning and setup ([e9c9c2a](https://github.com/BuddyLabsAI/dgateway/commit/e9c9c2a9fd8fdb0a6a11aeab5cbc869a806b597d))
+* **readme:** 📝 add console screenshot ([2dafd2e](https://github.com/BuddyLabsAI/dgateway/commit/2dafd2ec08d4807198940585a664adc7c92b83eb))
+* **readme:** 📝 add console screenshot ([bc1e340](https://github.com/BuddyLabsAI/dgateway/commit/bc1e340e82cf8c8634537f6a56a5565ba0cb6bd9))
+
 ## 0.1.0 (2026-11-14)
 
 
