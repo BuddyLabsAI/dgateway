@@ -1,0 +1,173 @@
+/* Design tokens, in two layers.
+   1. Primitives: the midnight-enamel palette, named for what they are. Components never use them.
+   2. Semantic roles: what components use. A light theme later remaps only this layer, under
+      [data-theme="light"], and every component follows.
+   Every text and graphic pair is checked against WCAG AA by tests/unit/console-web/tokens.test.ts. */
+:root {
+  /* Midnight ground, lighter per layer. */
+  --navy-1000: #080d17;
+  --navy-950: #0b111d;
+  --navy-900: #101828;
+  --navy-850: #152036;
+  --navy-800: #1b2943;
+  --navy-750: #22324f;
+  --navy-700: #2a3954;
+  --navy-650: #34456a;
+  --navy-500: #5a6c8e;
+
+  /* Porcelain inks. */
+  --porcelain-100: #e8eef8;
+  --porcelain-300: #b0bdd2;
+  --porcelain-500: #8a98b1;
+
+  /* Cobalt, the one interactive ink. */
+  --cobalt-300: #7ea6ff;
+  --cobalt-400: #5b8def;
+  --cobalt-600: #3366e6;
+  --cobalt-700: #2a56c9;
+  --cobalt-wash: #172a52;
+  --cobalt-band: #172b58;
+
+  /* Signals. */
+  --green-300: #4fd69c;
+  --green-wash: #0f2a22;
+  --amber-300: #f2b544;
+  --amber-wash: #2e2414;
+  --scarlet-300: #ff7a7a;
+  --scarlet-400: #f2545b;
+  --scarlet-600: #c2333b;
+  --scarlet-wash: #36161b;
+  --slate-300: #93a0b6;
+  --slate-wash: #1a2233;
+
+  /* Route line inks: categorical, chosen apart from every status colour. */
+  --ink-cobalt: #5b8def;
+  --ink-violet: #a78bfa;
+  --ink-teal: #2cc7b5;
+  --ink-pink: #f472b6;
+  --ink-porcelain: #c9d3e3;
+
+  /* Code inks, for JSON and shell on the sunk code ground. */
+  --syntax-blue: #8fb0ff;
+  --syntax-teal: #7fd8be;
+  --syntax-amber: #f0b97a;
+  --syntax-violet: #c4a5ff;
+}
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces: elevation is tone plus a hairline, not shadow. */
+  --surface-sunk: var(--navy-1000);
+  --surface-0: var(--navy-950);
+  --surface-1: var(--navy-900);
+  --surface-2: var(--navy-850);
+  --surface-3: var(--navy-800);
+  --surface-hover: var(--navy-800);
+  --surface-press: var(--navy-750);
+  --field: var(--navy-950);
+
+  --line-1: var(--navy-750);
+  --line-2: var(--navy-700);
+  --line-strong: var(--navy-650);
+  --line-control: var(--navy-500);
+
+  --text-1: var(--porcelain-100);
+  --text-2: var(--porcelain-300);
+  --text-3: var(--porcelain-500);
+
+  --accent: var(--cobalt-300);
+  --accent-fill: var(--cobalt-600);
+  --accent-fill-hover: var(--cobalt-700);
+  --accent-wash: var(--cobalt-wash);
+  --on-accent: #ffffff;
+  --focus: var(--cobalt-300);
+
+  --ok: var(--green-300);
+  --ok-wash: var(--green-wash);
+  --warn: var(--amber-300);
+  --warn-wash: var(--amber-wash);
+  --fail: var(--scarlet-300);
+  --fail-wash: var(--scarlet-wash);
+  --fail-fill: var(--scarlet-600);
+  --off: var(--slate-300);
+  --off-wash: var(--slate-wash);
+
+  /* Data series. The fallback hatch is drawn over the answered blue, so its stripes are amber. */
+  --series-ok: var(--cobalt-400);
+  --series-fallback: var(--amber-300);
+  --series-error: var(--scarlet-400);
+  --series-latency: var(--porcelain-100);
+  --series-band: var(--cobalt-band);
+  --series-grid: var(--navy-750);
+  --series-axis: var(--porcelain-500);
+  --series-cursor: var(--porcelain-300);
+
+  --line-ink-0: var(--ink-cobalt);
+  --line-ink-1: var(--ink-violet);
+  --line-ink-2: var(--ink-teal);
+  --line-ink-3: var(--ink-pink);
+  --line-ink-4: var(--ink-porcelain);
+
+  --code-key: var(--syntax-blue);
+  --code-string: var(--syntax-teal);
+  --code-number: var(--syntax-amber);
+  --code-literal: var(--syntax-violet);
+  --code-punct: var(--porcelain-500);
+  --code-text: var(--porcelain-300);
+  --code-command: var(--porcelain-100);
+  --code-flag: var(--syntax-blue);
+  --code-variable: var(--syntax-amber);
+
+  /* Text drawn on a data mark (attempt numbers on their segments). */
+  --on-series: var(--navy-950);
+
+  --edge-light: rgba(255, 255, 255, 0.14);
+  --backdrop: rgba(3, 6, 12, 0.72);
+
+  --shadow-float: 0 18px 48px -16px rgba(2, 5, 12, 0.85), 0 2px 6px rgba(2, 5, 12, 0.5);
+  --shadow-tip: 0 10px 28px -10px rgba(2, 5, 12, 0.9);
+}
+
+:root {
+  --font-text: "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "Overpass Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --text-3xs: 0.625rem;
+  --text-chart: 0.65625rem;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-code: 0.78125rem;
+  --text-base: 0.875rem;
+  --text-title: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --rail-width: 232px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 120ms;
+  --dur-state: 180ms;
+  --dur-enter: 240ms;
+}

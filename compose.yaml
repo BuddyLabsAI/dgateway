@@ -1,0 +1,17 @@
+name: dgateway
+services:
+  dgateway:
+    image: ghcr.io/buddylabsai/dgateway:latest
+    # Build locally with docker compose up -d --build.
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8790:8790"
+    volumes:
+      - gateway-data:/data
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+volumes:
+  gateway-data:

@@ -1,0 +1,31 @@
+---
+title: Management console
+description: Configure models, connections, tests and request visibility in one place.
+---
+
+Open `http://127.0.0.1:8790/` and enter the admin token. The server serves the console at the same origin as the API. The console communicates with the server only over HTTP.
+
+## What each screen does
+
+1. **Providers:** add a preset or custom connection, supply its key, inspect suggested models and run the known-answer test. Advanced settings expose endpoint, wire, timeout, limits, model hints and test model.
+2. **Models:** choose a route alias and order its provider steps. Add a fallback and optional input-token and output-token prices per step; an empty field shows the default the gateway uses. Test the route with the support-ticket check.
+3. **Try it:** send your own decision questions through the real route. Read answers, confidence, the answering vendor, resolved model, cost and attempt trace.
+4. **Requests:** inspect requests and filter fallback traffic. Cost labels distinguish billed, estimated and unpriced requests, and mark costs that leave out output tokens. The overview counts the unpriced requests and those without output cost.
+5. **Keys:** create or revoke application client keys and require them through settings. A key is shown only when created.
+
+A provider can answer but fail the known-answer check: read `matched` alongside `ok`, the chosen value and its probability. A preset that was checked against a vendor in the past is no substitute for a test with your own key. If a playground decision fails, it returns HTTP 200 with `response: null` and `error`. Inspect the body, not only the status.
+
+## Build and preview
+
+The console is its own app at `src/modules/gateway/apps/console-web`, with its own package, tsconfig and build:
+
+```sh
+cd src/modules/gateway/apps/console-web
+bun install
+bun run build
+bun run smoke
+```
+
+The smoke script serves `dist/` and checks that every asset, including the lazily loaded mock chunk, returns 200. If the console has not been built, the server serves a placeholder.
+
+Mock mode (`?mock=1`, or `bun run dev` in the console) loads the in-memory API on demand. Its fixtures are included in a separate production chunk that loads only in mock mode. This documentation site is a separate app, published as static files.

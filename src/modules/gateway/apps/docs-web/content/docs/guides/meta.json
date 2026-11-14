@@ -1,0 +1,14 @@
+{
+  "title": "Guides",
+  "pages": [
+    "getting-started",
+    "routing",
+    "providers",
+    "synthetic-decisions",
+    "typesafe",
+    "cost",
+    "console",
+    "security",
+    "development"
+  ]
+}

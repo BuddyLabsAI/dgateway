@@ -1,0 +1,45 @@
+---
+title: Routes
+description: Create, list, update and remove ordered fallback routes.
+---
+
+A route is an ordered list of steps. Each step names a provider and a model. Clients send the route's alias as `model`, and the gateway tries the steps in order, using the fallback rules below.
+
+All endpoints on this page require `Authorization: Bearer <ADMIN_TOKEN>`; a missing or incorrect token returns 401. Requests and responses use JSON, timestamps use ISO-8601, and errors contain an `error` object with `message`, `type`, and optional `code`.
+
+## Tested example
+
+With Bun and `ADMIN_TOKEN`, run this on a development gateway where `docs-example` is unused. It finds the seeded mock provider, creates a route, patches it and deletes it. `BASE_URL` defaults to `http://127.0.0.1:8790`. A patch to `targets` replaces the entire array.
+
+<include cwd lang="sh">
+  snippets/routes.sh
+</include>
+
+## Route fields and endpoints
+
+| Operation | Endpoint                       | Result           |
+| --------- | ------------------------------ | ---------------- |
+| List      | `GET /admin/api/routes`        | Array of routes. |
+| Create    | `POST /admin/api/routes`       | Created route.   |
+| Update    | `PATCH /admin/api/routes/:id`  | Updated route.   |
+| Delete    | `DELETE /admin/api/routes/:id` | `{ "ok": true }` |
+
+A route has four fields you write: `alias`, `description` (a string), `enabled` (a boolean) and `targets`. The gateway sets three more: `id`, `created_at` and `updated_at`. POST needs all four writable fields; PATCH accepts any subset. Do not send the generated fields. Each alias must be unique and match `[a-z0-9-]+`.
+
+`targets` is an ordered, non-empty array. Each target has `provider_id` (an existing provider), `model` and, optionally, `timeout_ms`, `price_per_m_input` and `price_per_m_output`. When PATCH includes `targets`, the new array replaces the old one; the two are not merged.
+
+The two optional prices are in USD per million tokens, one for input and one for output. A number of zero or more replaces the provider default for that side; `null` or no value keeps the default (see [Cost](/docs/reference/decisions#cost)). Each side is resolved on its own. Reads return the prices you set. POST and PATCH both accept them, and a negative or non-numeric value returns HTTP 400.
+
+### Fallback
+
+The gateway moves to the next target after a network error, a timeout, an upstream response it cannot read, or a target that is not eligible (see below). An upstream HTTP 400 or 422 stops the route instead; other HTTP errors move on to the next target. Before that rule applies, a chat-wire call may retry some 4xx responses with another method or transport (see [Upstream wires](/docs/reference/providers#upstream-wires)).
+
+Before calling a target, the gateway checks that it is eligible. A target that fails the check is skipped, recorded as a failed attempt (`"ok": false`), and the next target runs. The attempt's `error` tells you why:
+
+| Cause                                                                                                 | `error`                                                 |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| No provider has the target's `provider_id`                                                            | `provider not found`                                    |
+| The provider is disabled                                                                              | `provider disabled`                                     |
+| Too many questions or options for the provider's `limits`, or too many options for logprobs-only chat | `provider limits exceeded`                              |
+| The provider's environment variable is empty or not set                                               | `<ENV_VAR> is not set on the gateway host`              |
+| A stored key cannot be decrypted with the current secret                                              | `stored key cannot be decrypted (check GATEWAY_SECRET)` |

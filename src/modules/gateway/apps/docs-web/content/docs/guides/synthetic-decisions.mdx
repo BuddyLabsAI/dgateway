@@ -1,0 +1,121 @@
+---
+title: Synthetic decisions
+description: Use chat models with ordered logprobs, sampling and compact JSON.
+---
+
+Providers such as OpenAI, OpenRouter and TypeSafe have an API built for decision questions. Chat models can answer too. In a synthetic decision, a provider on the `chat` wire asks a chat model for token probabilities, samples several answers, or asks for a JSON estimate. dgateway turns the replies into the same answer shape that decision models return and marks those answers `gateway.synthetic: true`; native answers have `false`. Compatibility depends on both model and host, so run a known-answer test before routing production traffic.
+
+For OpenAI or OpenRouter, turn on the `openai-chat` or `openrouter-chat` provider, test a model, and add a route. A new install has both turned off, with no route. Their separate key settings use `OPENAI_API_KEY` and `OPENROUTER_API_KEY`, respectively, just like the native providers; the provider configurations themselves are independent. The Add provider screen also offers **OpenAI (chat-endpoint)**, **OpenRouter (chat-endpoint)**, and **Any OpenAI-compatible chat model (synthetic)**. Provider cards show **Native** or **Synthetic**. Adding a separate chat provider, rather than switching a native provider's wire under Advanced, leaves existing routes on the native decision API.
+
+## Methods and limits
+
+The `chat` wire talks to endpoints that follow the OpenAI chat completions format; the usual kinds for it are `openai`, `openrouter`, and `openai-compatible`. It always sends the target model. When you create a provider without a path, OpenRouter uses `/api/v1/chat/completions`. Other providers use `/chat/completions` if the base URL ends in `/v1`, or `/v1/chat/completions` otherwise. Changing an existing provider to chat also resets its path unless the PATCH supplies one. Paths can be edited. The seeded OpenAI base URL `https://api.openai.com/v1` therefore uses `/chat/completions`.
+
+| Setting             | Behavior                                                                                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `limits`            | Defaults to 16 questions and 64 choices, or 20 choices if logprobs is the only method. That configuration cannot set `max_choices` above 20.               |
+| `synthetic_methods` | A nonempty list without duplicates, chosen from `logprobs`, `sampling`, and `json`. Its order controls fallback; the default is those three in that order. |
+| `sampling_n`        | Integer from 2 through 32; default 8.                                                                                                                      |
+| `json_transport`    | `auto` (default), `json_schema`, or `prompt`.                                                                                                              |
+| `disable_reasoning` | Boolean; see below. Other values receive HTTP 400.                                                                                                         |
+
+POST and PATCH validate these settings. Native wires ignore them. `json` is terminal: once a question reaches it, methods listed after it are not tried. Known-answer provider tests use the same methods.
+
+By default requests share system instructions and an input-bearing user message, followed by question-specific text, which allows repeated input to benefit from provider prompt caching. `extra_body` can replace messages.
+
+No more than eight HTTP calls run at once per provider attempt. A single timeout covers chat calls and method or transport retries; an OpenRouter catalog fetch happens before it. If any question runs out of methods, the attempt fails and normal route fallback applies. Each provider attempt has one attempt log: successful traces include actual calls and responses; failed traces keep the planned request and any available failure response.
+
+### Log probabilities
+
+For each question, `logprobs` asks for a single plain-text label with `logprobs: true`, `top_logprobs: 20`, and `max_tokens: 1`. Choices use A through T, predicates Yes/No, and score levels 0 through 9. Questions with more than 20 choices skip this method. The prompt requests no JSON, punctuation, or quotes; sampling uses the same label prompt.
+
+The gateway normalizes whole tokens from the first token's `top_logprobs` using the label rules below, sums `exp(logprob)` for each label, and normalizes the resulting mass. Unseen labels receive zero. The answer identifies its `confidence_method` as `logprobs`.
+
+A question moves on to its next method if the response has no logprobs or no label receives any probability. It also moves on if the generated text itself is not a label, even if labels appear among the top logprobs. A 4xx error naming `logprobs` but not `top_logprobs` skips the method too. A 4xx other than 400 that names `top_logprobs` also moves it on. Once a response arrives without logprobs, questions still waiting in the queue skip this method; calls already in flight may finish. A message refusal or `content_filter` finish reason fails the attempt.
+
+Some hosts, including Fireworks and Novita, return an opaque HTTP 400 for `top_logprobs: 20`. The gateway reads a 400 as a refusal of `top_logprobs` when the error mentions `top_logprobs`, or when it mentions no other request parameter and not the model either. To decide, it searches the whole JSON error body, ignoring case, for these whole words: `messages`, `model`, `max_tokens`, `max_completion_tokens`, `temperature`, `response_format`, `json_schema`, `reasoning`, `reasoning_effort`, `tools`, `tool_choice`, `stop`, `seed`, `context_length`, or `context length`. A body naming `logprobs` without `top_logprobs` instead follows the unsupported-logprobs rule.
+
+The gateway retries a refused call once with `top_logprobs: 5` if the call asked for more than 5 and the question has 5 or fewer options or levels. A predicate counts as 2. The retry's `top_logprobs` overrides the value in `extra_body`. A question with more than 5 options moves on instead. If the refused call already asked for 5 or fewer, the question moves on and waiting questions skip logprobs; the same happens when the retry meets another such 400 or a 4xx naming `logprobs`. After one retry at 5 succeeds, every later logprobs call in the attempt asks for 5, so questions with more than 5 options skip this method. Setting `extra_body.top_logprobs: 5` can avoid the initial refusal.
+
+Only a 400 qualifies for the special top-logprobs retry. A 400 naming another parameter or model without naming either `logprobs` or `top_logprobs`, and other HTTP errors not handled by the method or reasoning retries, fail the attempt, as do network errors and timeouts. An unhandled 400 or 422 stops the route; other failures permit fallback to the next step. The same 400/422 rule applies to other methods. Refused calls that are passed over appear under `refused` in the trace and do not contribute to reported gateway usage.
+
+### Sampling
+
+Sampling requests `n: sampling_n` at temperature 1 with eight output tokens per sample. Choice labels are A through Z for up to 26 options and 1 through 64 beyond that; predicates use Yes/No and scores use 0 through 9. If the response contains too few choices, bounded parallel calls with `n: 1` fill the gap. At most `sampling_n` samples are read.
+
+A label must occupy the whole response after case folding, whitespace trimming, removal of one matching pair of quotes or backticks, and removal of one trailing period before and one after removing that pair. For example, `Yes.` is valid; `Yes!` and `{"output":"Yes"}` are not. If fewer than half of the configured `sampling_n` samples are valid, the question advances, even if the host returned fewer samples than requested. Otherwise each probability is the count divided by the valid sample count, without smoothing. Resolution is nominally `1/sampling_n`, or `1/valid_samples` when invalid samples are discarded. A result of zero or one describes the samples, not certainty. The answer uses `confidence_method: "sampling"`.
+
+### JSON estimates
+
+Questions that reach `json` are collected into one call for each transport tried. Keys `q0`, `q1`, and so on correspond to original question positions. A choice or score is an array of integer percentages from 0 to 100, in option or level order; a predicate is a single integer percentage for P(Yes). Suppose question 0 is a three-way choice, question 1 was already answered by logprobs, question 2 is a predicate and question 3 is a three-level score. A valid reply is `{ "q0": [60, 30, 30], "q2": 85, "q3": [10, 30, 10] }`, which becomes choice probabilities 0.5, 0.25 and 0.25, P(Yes) 0.85, and score probabilities 0.2, 0.6 and 0.2. All requested keys must appear, with no extras, correct array lengths, in-range integers and positive array mass. The gateway renormalizes the arrays. Invalid shapes or missing keys fail the attempt; unparseable JSON fails if no transport retry succeeds. The output bound scales with the number of questions and options. `confidence_method: "json"` identifies these as model-stated estimates. Evaluate all methods against labelled examples; none guarantees calibration.
+
+By default the `json_schema` transport sends `response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } }` and parses message content. The `prompt` transport omits response format, requests JSON and extracts the first object, including from a code fence. Both use a compact schema for the deferred questions.
+
+With `auto`, every provider kind tries `json_schema` first and then `prompt` once if a 4xx names `response_format` or `json_schema`, or the reply cannot be parsed as a JSON object. Invalid probability shape does not trigger that retry. Explicit transport choices do not switch. Refusals and content filters fail immediately; other HTTP errors use normal route fallback, including the 400/422 stop rule. Neither tools nor `tool_choice` are sent by default; `extra_body` can override request fields.
+
+### Answers and accounting
+
+Synthetic confidence is `1 - H(p)/ln(K)`, where H(p) is the entropy of the probabilities and K is the number of possible answers. It measures how concentrated the probabilities are, not correctness. A choice returns the most likely option, or the first of tied options. A predicate returns P(Yes), and a score returns the expected level index. `gateway.confidence_method` is the shared method when all answers with confidence use it, `mixed` when they use different methods, and `none` when no answer has confidence.
+
+The gateway sums usage from answered calls, including samples and retries. Prompt, completion, and total tokens become input, output, and total; token details are also summed. An `n` request uses the input usage reported by the upstream without multiplying it by `n`. Passed-over 4xx refusals (for logprobs, response format, opaque top-logprobs 400, or mandatory reasoning) are recorded under `refused` and excluded from reported usage and billed-cost sums. When even one answered call lacks usage, the public `usage` is `null`, and the token estimate counts every chat message sent, repeated input and refused calls included.
+
+When every answered call supplies a valid `usage.cost`, those costs are summed and rounded to 12 decimal places to remove floating-point noise. Otherwise the gateway applies input and output rates to the summed token counts, or to the input estimate when usage is missing. A missing usage block means no output count, which leaves `cost_includes_output` at `false` unless output costs nothing. Failed attempts receive no gateway cost, although upstream billing can differ. Upstream model and provider names are retained only if all calls agree. Without a billed cost, OpenAI-kind chat models missing from the built-in price table need a route input price or model hint to be priced; chat adds no built-in prices.
+
+`extra_body` can override any request field except the model. Setting `max_completion_tokens` there drops the default `max_tokens`. Any `logprobs` and `top_logprobs` values in `extra_body` are sent only on logprobs calls, never on sampling or JSON calls.
+
+## Reasoning models and cost
+
+A model can spend the small output budget on reasoning and return no content. The console's Advanced **Turn reasoning off** setting controls `disable_reasoning`. If you leave it unset, the gateway picks a value on each call: on for `openrouter`, and off for all other kinds, `openai` and `openai-compatible` included. A provider response shows the field only when you set it yourself.
+
+With the setting enabled, any chat call can carry the kind's off field: logprobs calls, sampling calls, the single-sample calls that top up a short `n` response, and JSON calls.
+
+OpenRouter calls send `reasoning: { "enabled": false }` only if the cached catalog entry for the target model lists `reasoning` or `include_reasoning` in `supported_parameters`. Missing entries, unsupported models, and unavailable catalogs receive no field; this avoids filtering their hosts when `extra_body.provider.require_parameters: true` is used. Expired entries are still read.
+
+OpenAI and compatible kinds send `reasoning_effort: "none"` when the setting is on. OpenAI's reasoning models from GPT-5.1 onward accept that value. Older models, and models that do not reason, may refuse it. Other kinds send no reasoning field. Explicit `extra_body.reasoning` or `extra_body.reasoning_effort` wins over automatic settings and disables the automatic retry; `extra_body` is merged last.
+
+After a 4xx refusal of an automatic off field, the gateway retries once at low effort. The error body must contain `reasoning` followed by `mandatory`, `required`, or `cannot be disabled`, with no period between them. The retry sends `reasoning: { "effort": "low" }` for OpenRouter, or `reasoning_effort: "low"` for OpenAI and compatible kinds. With the retry, the default output budget increases by 2048 tokens: 2049 for logprobs, 2056 for sampling, and the usual JSON bound plus 2048. Explicit `extra_body.max_tokens` or `max_completion_tokens` still wins. Calls started after the refusal use low effort and the larger budget directly; calls already in progress can still use the original setting. The refused call is excluded from reported usage and recorded under `refused`; answered retries count. A second refusal or other retry failure follows ordinary failure handling. Leading whitespace and newlines are trimmed from labels; if no label arrives the method advances normally. This retry can cost more.
+
+Some OpenAI reasoning models reject `logprobs` with 400, and the configured method order then tries sampling or JSON. They may also require `extra_body.max_completion_tokens` instead of `max_tokens`. Sampling generates output, including reasoning tokens, for each sample, though an `n` call shares input as reported by the upstream. Fewer samples or `['json']` can limit calls. The gateway sums output tokens and includes their price when both count and rate are available, flagging incomplete costs; an upstream `usage.cost` supplied for every answered call takes precedence.
+
+### OpenRouter catalog
+
+OpenRouter chat attempts use the catalog for reasoning support and pricing. The cache is held in memory, so it is empty after every gateway start. If none is cached, a decision fetches `GET {models URL}` with the provider key, as the models endpoint does. The timeout is two seconds or the provider's shorter `timeout_ms`. The cache lasts ten minutes, and attempts that run at the same time for one provider share a single fetch. A decision does not refetch because an entry has expired: it keeps using the old entry. Fetch time contributes to `latency_ms`, but is outside the attempt timeout.
+
+A network error, timeout, non-2xx response or unreadable body does not fail the decision: without a catalog it sends no automatic reasoning field and has no catalog price. A billed cost or step input price can still price the answer; otherwise it is unpriced. After a failed fetch, decisions wait five minutes before trying again, while listing the provider's models can refresh the catalog at any moment. Decisions on other kinds and wires never fetch a catalog. Chat providers list models via `GET {models URL}`, merging hints first on a fresh fetch. OpenRouter uses the ten-minute cache without filtering to decision models; cache hits return the upstream list without merging hints. Native listings retain their own rules.
+
+## Observed provider behavior (November 2026)
+
+Providers change; test your own setup.
+
+- Some open-weight models reason by default and can use up the small answer budget before producing a label. The OpenRouter catalog listed `meta-llama/llama-4-maverick`, `mistralai/mistral-small-3.2-24b-instruct`, and `meta-llama/llama-3.1-8b-instruct` without either reasoning parameter. The catalog alone cannot tell you whether such a model reasons by default.
+- Venice, Together, Parasail, and Fireworks answered the off field with HTTP 400 mandatory-reasoning refusals through OpenRouter, including `Reasoning is mandatory for this endpoint and cannot be disabled.` The low-effort retry described above handles matching refusals.
+- Together returned no logprobs for GLM 5.3 Flash despite advertised support. Fireworks and Novita returned an HTTP 400 for `top_logprobs: 20`, sometimes with only `Provider returned error`; the gateway can retry eligible questions at 5.
+- Models can return labels with leading spaces or newlines, or add a period such as `Yes.`; the label reader trims whitespace and tolerates that period. Some return a JSON-shaped label such as `{"output":"2"}` instead of plain text, which is not a valid label. Prompt-transport JSON can appear inside a code fence.
+
+Logprob support depends on both the model and its serving host. Test them together. OpenRouter may select a host that returns no logprobs despite a request for them. `extra_body.provider.require_parameters: true` asks for hosts advertising support; inspect the response. `extra_body.provider.only` can pin a host. As the Together example above shows, advertised support is no guarantee. A short `n` response causes extra single-sample calls and can increase cost. Models may also use their budget for reasoning; try the reasoning setting and configured methods, including `['json']` for models without logprobs.
+
+Calls to models whose catalog entry lists neither reasoning parameter never carry the automatic off field. To turn reasoning off for such a model, send `extra_body.reasoning` yourself; to stop sending the automatic field to any model, set `disable_reasoning: false`. Playground traces show logprob tokens such as `"token": "A"`; credentials remain redacted.
+
+## Configuration example
+
+This admin POST body configures a local compatible server:
+
+```json
+{
+  "name": "synthetic-chat",
+  "kind": "openai-compatible",
+  "base_url": "http://host.docker.internal:8000",
+  "wire": "chat",
+  "enabled": true,
+  "timeout_ms": 20000,
+  "limits": { "max_questions": 16, "max_choices": 64 },
+  "extra_body": {},
+  "key": { "source": "none" },
+  "synthetic_methods": ["logprobs", "sampling", "json"],
+  "sampling_n": 8,
+  "json_transport": "auto",
+  "disable_reasoning": false
+}
+```
+
+The [decision reference](/docs/reference/decisions#synthetic-answer) shows a synthetic answer. See [provider management](/docs/reference/providers) for writable fields and [cost tracking](/docs/guides/cost) for pricing.

@@ -1,0 +1,78 @@
+---
+title: Routing and fallback
+description: Give your app a stable route name and try providers in order.
+---
+
+Your app sends a route name in the `model` field, such as `"model": "support"`. A route is a list of steps in order. Each step names a provider and a model. dgateway tries the first step. If that call fails, it tries the next one.
+
+You change the steps on the console's Models screen. Your app keeps sending the same name.
+
+## Choose a model
+
+The public request's `model` can be a route alias (`default`, `luna`, `elephant` or one you create). Omit it to use `settings.default_route`. To bypass routes, use `provider-name::upstream-model`.
+
+A route has a unique `[a-z0-9-]+` alias, description, enabled flag and ordered steps (`targets` in the API). Each step names `provider_id` and upstream `model`, with optional `timeout_ms`, `price_per_m_input` and `price_per_m_output`. Your app keeps the alias while you change its steps.
+
+## A local-only route
+
+To keep a task on your machine, give its route only local steps. SystemOne is the decision API that TypeSafe defined; its requests send the input as `state` and the questions as a map. For a SystemOne server on your machine, turn on the seeded `llamacpp` provider in the console and set its base URL and path for your server. The seed uses `http://host.docker.internal:8080` and `/v1/systemone`.
+
+Inside a container, `localhost` is the container itself. The `--add-host` line in the [Docker command](/docs/guides/getting-started) lets a container on Linux reach your machine as `host.docker.internal`; Docker Desktop has this name already. The model server must listen on an address the container can reach.
+
+Create a route with exactly one step:
+
+```text
+alias: local-only
+1. provider: llamacpp    model: server-configured
+```
+
+Send `"model": "local-only"`. If the local server fails, the request fails; it never goes to a hosted provider. Use a second route when you do want a hosted fallback. A SystemOne server that selects its own model can ignore the step's model; the seeded provider does not send it. For Ollama or vLLM, add its console preset and make that provider the only step instead. Both presets call a native decision endpoint, not a chat endpoint: Ollama uses SystemOne at `/v1/systemone` on port 11434, and vLLM uses the OpenAI decisions shape at `/v1/decisions` on port 8000.
+
+## Fallback rules
+
+The server checks each step's provider limits and key before trying it, in route order. dgateway moves to the next step after a missing key, a timeout, a network error, a malformed answer or an upstream HTTP error. An upstream HTTP **400 or 422 stops the route** instead. Request logs keep every attempt, and you can filter them for requests that needed a fallback.
+
+This is the `gateway` part of a real response from a test route named `support`. Its first step was OpenAI with no API key set, and its second step was the mock. The answer came from the second step:
+
+```json
+"gateway": {
+  "route": "support",
+  "provider": "mock",
+  "upstream_model": "mock-1",
+  "served_by": "Mock",
+  "upstream_model_resolved": "mock-1",
+  "synthetic": false,
+  "latency_ms": 1,
+  "attempts": [
+    {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "ok": false,
+      "latency_ms": 0,
+      "error": "OPENAI_API_KEY is not set on the gateway host"
+    },
+    { "provider": "mock", "model": "mock-1", "ok": true, "latency_ms": 0 }
+  ],
+  "confidence_method": "upstream",
+  "cost_usd": 0,
+  "cost_basis": "upstream_cost",
+  "cost_includes_output": true,
+  "tokens": 76
+}
+```
+
+A disabled provider is recorded as a failed attempt with `provider disabled`, then the next step is tried. Missing providers and exceeded limits are recorded as `provider not found` and `provider limits exceeded`. A provider test does not change health.
+
+Deleting a provider still targeted by any route returns **409** and names those routes. Remove its steps first. A PATCH replaces `targets` as a whole; preserve every step you want to keep. See [route fields and endpoints](/docs/reference/routes).
+
+## Provider and attempt metadata
+
+`gateway.route` is the alias, or `null` for a direct provider call. `gateway.provider` names the answering provider. `upstream_model` is the step's model, even when a provider using the map wire with `send_model` off leaves it out of the request. `served_by` and `upstream_model_resolved` report the upstream's vendor and resolved model when it provides them. `gateway.attempts` records every tried step, its latency, success and any error.
+
+`fallback_used` in a log means **more than one attempt**, even if the final attempt failed. Filter requests with `fallback=used|none`. Statistics distinguish all `fallbacks` from `fallbacks_answered`; their difference is the fallbacks that failed. [Logs and statistics](/docs/reference/observability) describes both.
+
+## Question limits and confidence
+
+One request can hold 1–400 questions. When a provider allows fewer, dgateway moves on to the route's next step. Choice questions accept 2–64 choices; score questions accept 2–10 levels. Duplicate score labels are rejected.
+
+A score is the expected zero-based level index computed from its probabilities, not the upstream's own score. Choice and score confidence comes from the upstream when present, otherwise `1 - H(p) / ln(K)`, where H(p) is the entropy of the answer's probabilities and K is the number of possible answers. That formula measures concentration, not the probability an answer is correct; upstream confidence depends on the provider. The gateway reports `mixed` if answer confidence methods differ and `none` when no answer carries confidence, such as a native predicate-only or entirely refused response.

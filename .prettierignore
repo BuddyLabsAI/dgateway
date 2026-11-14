@@ -1,0 +1,8 @@
+src/modules/gateway/apps/console-web/
+tests/unit/console-web/
+node_modules/
+src/modules/gateway/apps/docs-web/.next/
+src/modules/gateway/apps/docs-web/out/
+src/modules/gateway/apps/docs-web/.source/
+src/modules/gateway/apps/docs-web/public/search-index.json
+src/modules/gateway/apps/docs-web/next-env.d.ts

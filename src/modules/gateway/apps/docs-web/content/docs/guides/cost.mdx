@@ -1,0 +1,92 @@
+---
+title: Cost tracking
+description: Understand billed, priced and unpriced requests.
+---
+
+## What the amount means
+
+Each answered decision reports `gateway.cost_usd`, the cost in USD. `cost_basis` says where the number came from:
+
+| `cost_basis`       | How the cost was found                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `upstream_cost`    | The provider reported the billed amount, a non-negative numeric `usage.cost`. dgateway keeps it as reported, even 0.                  |
+| `upstream_tokens`  | Token counts from the provider, times a price per million tokens.                                                                     |
+| `estimated_tokens` | No token counts came back. dgateway estimates input tokens as `ceil(characters / 4)` and applies the price. There is no output count. |
+| `unpriced`         | No bill and no price is known, such as a local llama.cpp or Ollama server with no price set. `cost_usd` is `null`.                    |
+
+You can set a price per million input and output tokens on each route step. When no output price is known, the cost covers input only and `cost_includes_output` is `false`. `tokens` is the input token count.
+
+The cost belongs to **only the attempt that answered**. dgateway assigns no cost to failed attempts, although a provider may still bill them, so gateway totals can be lower than the bill. Attempts have no cost field. Treat these numbers as a view of spending, not a spending limit.
+
+`cost_usd` is `null` when dgateway cannot price a call: the provider sent no billed amount and no price is set. A `null` means the cost is unknown, not zero. On a failed request the log's cost, basis and tokens are all `null`.
+
+The mock reports a billed zero, so its answers use `upstream_cost`. Local llama.cpp and Ollama servers have no default price: without a step price, model hint price or billed amount, their answers are `unpriced`. Never present an unpriced answer as zero cost.
+
+## Resolve a price
+
+When the upstream reports a billed amount, that amount is the cost and **no** price applies, not even a step override. Without a billed amount, the input price is the route step's `price_per_m_input` if it is set. A price of 0 is valid; null or a missing field means "use the default". Otherwise the provider's default applies:
+
+| Provider                         | Default, in USD per million input tokens                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `mock`                           | 0                                                                                                         |
+| `openrouter`                     | Model input price from its cached catalog, if known                                                       |
+| `openai`                         | Built-in table: `gpt-6-luna` 0.10 input, 0.01 cached input, 0.125 cache writes; other models use the hint |
+| `systemone`, `openai-compatible` | Matching model hint price, if set                                                                         |
+| Anything else                    | Unpriced                                                                                                  |
+
+A local host is `localhost`, `127.0.0.0/8`, `::1`, `host.docker.internal`, `*.local`, `10.0.0.0/8`, `172.16.0.0/12` or `192.168.0.0/16`. Only the host in the URL is checked; the gateway does no DNS lookup, so a public name that points to a private address still counts as hosted. Local and hosted SystemOne providers follow the same pricing rules. Locality only affects whether the model is sent by default.
+
+List the OpenRouter provider's models to populate its 10-minute catalog cache; expired cached prices remain usable. An OpenRouter chat-wire decision also fetches the catalog when none is cached; a failed fetch does not fail the decision. An unknown catalog model stays unpriced unless a billed cost or step price is supplied. The models endpoint's `default_price_per_m_input` uses the same defaults as decisions.
+
+## Resolve an output price
+
+The output price is chosen separately from the input price, so a step can set one and leave the other at its default. The route step's `price_per_m_output` comes first when it is set; otherwise the provider's default applies:
+
+| Provider                         | Default, in USD per million output tokens                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mock`                           | 0                                                                                                                                                                                                                                                                                                                                       |
+| `openrouter`                     | Model completion price (`pricing.completion`) from its cached catalog, if known                                                                                                                                                                                                                                                         |
+| `openai`                         | Built-in table: `gpt-6-luna` 0 on the native `openai` and `map` wires, since [OpenAI Decisions](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability) bills no output, and 0.50 on `chat` ([OpenAI pricing](https://developers.openai.com/api/docs/pricing), read on 2026-11-11); other models use the hint |
+| `systemone`, `openai-compatible` | Matching model hint's `price_per_m_output`, if set                                                                                                                                                                                                                                                                                      |
+| Anything else                    | No output price                                                                                                                                                                                                                                                                                                                         |
+
+Model hints take `price_per_m_output` beside `price_per_m_input`. The models endpoint lists `price_per_m_output` (catalog or hint) and `default_price_per_m_output` (what a decision is charged when the step sets none), using the same rules and cached catalog as decisions. Listings and charges therefore agree.
+
+## Count tokens and calculate
+
+The input count is the upstream's `usage.input_tokens` when the response has usage (the older `prompt_tokens` name is accepted too). Without usage, a native decision estimates `ceil(characters / 4)` from the input plus all question instructions and option or level descriptions sent upstream. Synthetic decisions estimate from the actual chat messages instead, as described below. Characters are Unicode code points. `tokens` remains the full input count for every answered attempt, even billed and unpriced answers.
+
+The output count is the upstream's `usage.output_tokens`. Some upstreams, including OpenAI, include reasoning tokens in that count. Those tokens are charged as output. With flat prices the formula is:
+
+```text
+cost_usd = round((tokens * input_price + output_tokens * output_price) / 1_000_000, 8)
+```
+
+When the output count is 0, only the input part is left, so a native decision that reports no output tokens costs just its input.
+
+Cache rates exist only in the built-in OpenAI table. The cached count (`input_tokens_details.cached_tokens`) and the written count (`cache_write_tokens`) are parts of `input_tokens`, and a missing detail counts as 0. The rest of the input is charged at the normal rate:
+
+```text
+cost_usd = round(((tokens - cached - written) * price
+  + cached * cached_rate + written * write_rate + output_tokens * output_price) / 1_000_000, 8)
+```
+
+If the details are malformed (negative, not whole numbers, or adding up to more than the input tokens), the gateway ignores them and charges all input at the normal rate. Step, catalog and hint prices are flat over every input token, including cache reads and writes. Billed amounts are kept as reported rather than rounded by these formulas.
+
+The table holds OpenAI's Standard-tier, short-context prices: input and cache rates as published on **2026-11-08** and the output rate as published on **2026-11-11**, assuming the default 30-minute cache lifetime. The gateway never asks for a processing tier, and the table has no Batch, Flex or Fast prices, regional premiums, or prices for longer cache lifetimes requested through `extra_body`. It also ignores OpenAI's long-prompt surcharge: above 272K input tokens OpenAI doubles the input and cache rates and charges 0.75 rather than 0.50 per million output tokens for gpt-6-luna on the chat wire.
+
+## Synthetic chat costs
+
+One synthetic attempt can make several chat calls. These include logprobs calls, sampling calls, extra calls to fill a short sample, a batched JSON call, and transport retries. Usage is the sum over every call that answered, cached details included. Calls that ended in an HTTP error and were retried or skipped are left out, although the upstream may still bill them. For a call with `n` samples, input is counted as the upstream reports it, not multiplied by `n`.
+
+If any answered call has no usage, the public usage is null and the estimate counts the chat messages actually sent, so repeated input counts each time. Requests share a common message prefix, which lets providers apply prompt caching. Sampling can multiply the output and reasoning cost. A billed cost is used only when every answered call reports one; the gateway then sums them. An OpenAI model missing from the built-in table can be priced by a matching model hint or a route price; without either it is unpriced.
+
+## Costs that leave out output
+
+The gateway does not invent an output price. If the upstream reports one or more output tokens and no output price applies, the cost covers only the input and `gateway.cost_includes_output` is `false`. The flag is also `false` for a response without usage (so no known output count) whose output price is not zero. It reads `true` in four cases: a billed cost, an output count of 0, a known count with a known output price, or an output rate of 0. Without an input price the cost is `null`, whatever the output price. The console marks such costs "output cost not included" and counts them on the overview. A local server with no output price has `cost_includes_output: false` when it reports output tokens or no usage; a reported output count of 0 still sets the flag to true.
+
+## Logs and totals
+
+Request logs carry cost, basis, tokens and `cost_includes_output`; older entries missing these fields read null. Historical rows stored with basis `free` read as `unpriced`, with their recorded cost of 0 and output flag preserved. Storage is unchanged, and these rows count toward unpriced totals. The window and each provider and route group count answered requests with `cost_includes_output: false` as `output_unpriced`. Window totals, provider groups and route groups sum priced and billed requests, rounded to 8 decimals, and count answered `unpriced` requests. Failed and unpriced requests add nothing to the sum. A billed zero is never unpriced.
+
+Each of the 24 timeseries buckets has `cost_usd`, but no `unpriced` count. Empty totals are 0, never null; empty-window or empty-bucket latency statistics are null. [Logs and statistics](/docs/reference/observability) lists every field.

@@ -1,0 +1,9 @@
+{
+  "name": "@dgateway/commit-message",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Conventional Commits with gitmoji: a dependency-free commit message checker",
+  "type": "module",
+  "exports": "./index.ts",
+  "license": "MIT"
+}

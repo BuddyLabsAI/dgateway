@@ -1,0 +1,53 @@
+---
+title: Development and migrations
+description: Work within module boundaries and run the repository checks.
+---
+
+## Architecture
+
+`src/modules/gateway/libs` holds decisions, routing and management domains. `functions/` and `schemas/` are pure; `effects/` coordinate dependencies and `providers/` perform external operations. REST APIs and the server stay inside the module. `src/packages/decision-client` is an independent typed client.
+
+Packages never import module code; modules never import each other; libs never import APIs or apps. Effects do not depend on REST request objects. Prefer pure functions: gather inputs, decide, then perform effects. Separate functions with a blank line. Apps are named `<name>-<type>` (`web`, `daemon`, `cli`, `mobile`). See root `AGENTS.md` for the rules.
+
+The console and docs site each have their own package, tsconfig and build. They import no backend code. Documentation snippets demonstrate the independent client over HTTP and are run by the root integration suite.
+
+## Checks and tests
+
+From the repository root:
+
+```sh
+bun run check
+bun run format
+bun run lint
+bun run lint:fix
+```
+
+`check` runs Prettier, zero-warning ESLint, backend TypeScript and `bun test`. Tests live at root: pure function tests in `tests/unit/` without mocks; HTTP integration and architecture tests in `tests/integration/`; Compose tests in `tests/e2e/`. Console unit tests live in `tests/unit/console-web/`, and its own `bun test` script runs them.
+
+The console's folder supports `bun run typecheck`, `bun test`, `bun run build` and `bun run smoke`. Root lint uses the backend and console's own tsconfigs, enforces console import boundaries and React hooks, and budgets effects at complexity 6, nesting depth 2 and 40 lines per function. Prettier owns formatting. Docs sources are formatted by root checks, but excluded from root ESLint because Next.js/MDX has a separate toolchain. Run `bun run docs:check` and `bun run docs:build` at root for that app.
+
+`bun run test:e2e` needs Docker and Compose. It builds with `SKIP_CONSOLE=true` to exercise the placeholder. A normal image builds the console whenever its package is present, and fails if that build fails. Tests use a temporary Compose project and environment, choose a free localhost port (or `E2E_PORT`), keep 8790 inside the container, and remove their container and volume afterward. An existing gateway on 8790 can keep running.
+
+## Build the documentation
+
+```sh
+cd src/modules/gateway/apps/docs-web
+bun install
+bun run dev
+bun run types:check
+bun run build
+```
+
+`out/` contains the whole static site. Search runs in the browser using a generated JSON index, and fonts are local. Serve the directory with any static host supporting index files; no Next.js server is needed. Snippets are included directly into reference pages and tested against a fresh gateway with the seeded `default` route and mock, without external keys.
+
+## Database migrations
+
+Providers stored before `send_model` and `auth_header` existed retain their behavior: map-wire OpenRouter sends a model, other old map-wire providers (including `llamacpp`) do not; openai-wire providers send it. Migrated providers use `authorization`, empty hints and null `test_model`.
+
+Migration **8** runs once and applies the 12-character rule for displayed key tails to keys stored by earlier releases. A key it cannot decrypt at that start loses its displayed tail unless its ciphertext is long enough to prove 12 characters. This changes only the displayed tail, not the stored key. See the [provider reference](/docs/reference/providers) for details.
+
+Earlier versions seeded a local OpenAI-compatible provider at `http://host.docker.internal:8000/v1`, path `/decisions`. Migration **4** now only records that it ran; migration **5** does its work instead and runs once at startup, whether or not 4 ran before. Migration 5 requires kind `openai-compatible`, exactly that URL and path, wire `openai` and key source `none`. The provider's `created_at` must equal the oldest stored provider's timestamp and match at least one other provider from that seed batch. The provider's name plays no part.
+
+With an enabled mock, the first enabled mock in stored order receives those route targets as `mock-1`. The first retired target becomes that mock step, repeats are dropped, the timeout is preserved and its price override removed. A route already containing **any** mock target, even disabled, keeps it and drops the retired targets. Other targets retain order. The retired provider is deleted; one startup line names it and the routes moved or says it was unused.
+
+If no mock exists, or all mocks are disabled, the old provider and routes stay unchanged with a diagnostic line. A provider that does not match every seed condition is left alone and nothing is logged, for example a provider added later at the same URL, or the only one left from a seed batch whose other members were deleted. No matching provider means no migration log line. The [provider reference](/docs/reference/providers) gives the full storage contract.

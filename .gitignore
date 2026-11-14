@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+.next/
+.source/
+.turbo/
+.vite/
+.cache/
+*.tsbuildinfo
+next-env.d.ts
+/src/modules/gateway/apps/docs-web/public/search-index.json
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Logs and test output
+*.log
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+junit.xml
+junit-*.xml
+
+# Tool caches and local artifacts
+.eslintcache
+.prettiercache
+.scratch-env
+.impeccable/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+.directory
+*~
+
+# Editors
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Local agent state
+.claude/settings.local.json
+.claude/.local/
+.aider*
+
+# Temporary files
+tmp/
+*.tmp
+.local/
+
+# Local design and agent materials
+.claude/skills/
+**/PRODUCT.md
+**/DESIGN.md

@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","strict":true,"noEmit":true,"types":["bun"],"skipLibCheck":true},"include":["src/modules/gateway/libs/**/*.ts","src/modules/gateway/api/**/*.ts","src/modules/gateway/apps/gateway-daemon/**/*.ts","src/packages/**/*.ts","tests/**/*.ts","scripts/**/*.ts"],"exclude":["tests/unit/console-web"]}

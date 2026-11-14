@@ -1,0 +1,80 @@
+{
+  "response": null,
+  "error": {
+    "message": "invalid upstream response: answer identity mismatch; {\"model\":\"gpt-6-luna\",\"answers\":[{\"type\":\"choice\",\"name\":\"team\",\"choice\":\"billing\",\"probabilities\":[{\"value\":\"billing\",\"probability\":1},{\"value\":\"technical\",\"probability\":0},{\"value\":true,\"probability",
+    "type": "upstream_error"
+  },
+  "trace": {
+    "attempts": [
+      {
+        "provider": "openai",
+        "model": "gpt-6-luna",
+        "ok": false,
+        "latency_ms": 386,
+        "error": "invalid upstream response: answer identity mismatch; {\"model\":\"gpt-6-luna\",\"answers\":[{\"type\":\"choice\",\"name\":\"team\",\"choice\":\"billing\",\"probabilities\":[{\"value\":\"billing\",\"probability\":1},{\"value\":\"technical\",\"probability\":0},{\"value\":true,\"probability"
+      }
+    ],
+    "upstream_request": {
+      "model": "gpt-6-luna",
+      "input": "I was charged twice for my subscription and the second charge still shows.",
+      "questions": [
+        {
+          "name": "team",
+          "type": "choice",
+          "instructions": "Which team?",
+          "choices": [
+            { "value": "billing", "description": "Payments and refunds" },
+            { "value": "technical", "description": "Bugs" },
+            { "value": true, "description": "A boolean option" }
+          ]
+        },
+        { "name": "urgent", "type": "predicate", "instructions": "Is it urgent?" },
+        {
+          "name": "severity",
+          "type": "score",
+          "instructions": "How severe?",
+          "levels": [
+            { "label": "minor", "description": "Small inconvenience" },
+            { "label": "major", "description": "Money lost" },
+            { "label": "critical", "description": "Account at risk" }
+          ]
+        }
+      ]
+    },
+    "upstream_response": {
+      "model": "gpt-6-luna",
+      "answers": [
+        {
+          "type": "choice",
+          "name": "team",
+          "choice": "billing",
+          "probabilities": [
+            { "value": "billing", "probability": 1 },
+            { "value": "technical", "probability": 0 },
+            { "value": true, "probability": 0 }
+          ],
+          "confidence": 1
+        },
+        { "type": "predicate", "name": "urgent", "probability": 0.5 },
+        {
+          "type": "score",
+          "name": "severity",
+          "score": 0.99,
+          "probabilities": [
+            { "value": 0, "label": "minor", "probability": 0.01 },
+            { "value": 1, "label": "major", "probability": 0.99 },
+            { "value": 2, "label": "critical", "probability": 0 }
+          ],
+          "confidence": 0.99
+        }
+      ],
+      "usage": {
+        "input_tokens": 394,
+        "input_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0 },
+        "output_tokens": 0,
+        "output_tokens_details": { "reasoning_tokens": 0 },
+        "total_tokens": 394
+      }
+    }
+  }
+}

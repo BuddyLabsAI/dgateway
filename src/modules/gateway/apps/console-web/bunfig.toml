@@ -1,0 +1,6 @@
+[serve.static]
+env = "BUN_PUBLIC_*"
+
+# The console's unit tests live in the root tests/ folder with the other tests.
+[test]
+root = "../../../../../tests/unit/console-web"

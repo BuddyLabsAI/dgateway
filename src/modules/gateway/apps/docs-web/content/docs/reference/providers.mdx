@@ -1,0 +1,376 @@
+---
+title: Provider management
+description: Configure upstream connections, inspect available models and check a provider's answers.
+---
+
+A provider describes one connection the gateway can use to answer decisions: its address, protocol, credentials and limits. Routes refer to providers by ID. The admin API lets you manage those connections and test them independently of route selection.
+
+Authenticate every request here with `Authorization: Bearer <ADMIN_TOKEN>`; an absent or incorrect token produces HTTP 401. Request and response bodies use JSON. Dates use ISO-8601 strings. An HTTP error has an `error` object containing `message`, `type` and, when available, `code`.
+
+| Operation                | Endpoint                              | Request body                                | Result                             |
+| ------------------------ | ------------------------------------- | ------------------------------------------- | ---------------------------------- |
+| Read all providers       | `GET /admin/api/providers`            | None                                        | Array of provider records          |
+| Create a provider        | `POST /admin/api/providers`           | Writable fields, including a write-form key | Created record                     |
+| Edit a provider          | `PATCH /admin/api/providers/:id`      | Fields to change                            | Updated record                     |
+| Remove a provider        | `DELETE /admin/api/providers/:id`     | None                                        | `{ "ok": true }`                   |
+| Run a known-answer check | `POST /admin/api/providers/:id/test`  | An object, optionally containing `model`    | Test verdict, decision and trace   |
+| Inspect models           | `GET /admin/api/providers/:id/models` | None                                        | Object containing a `models` array |
+
+A provider cannot be deleted while any route targets it, including a disabled route. That request returns 409 with `error.type: "invalid_request_error"`, `error.code: "provider_in_use"` and `error.routes`, an array of the blocking routes' `id` and `alias`. The message identifies those aliases and asks you to remove the targets first. The console lets you open each blocking route.
+
+## Tested example
+
+The script below exercises creation, model discovery, a provider test, an edit and deletion using a disposable mock connection. Use a development gateway: the script writes provider records and logs the test decision. Install Bun, export `ADMIN_TOKEN` and leave the name `docs-example` available. To use a different gateway, set `BASE_URL`; otherwise requests go to `http://127.0.0.1:8790`. Bun extracts the newly created ID from the JSON response.
+
+<include cwd lang="sh">
+  snippets/providers.sh
+</include>
+
+## Provider fields and behavior
+
+Creation accepts the configurable fields in this section. A create request must include `name`, `kind`, `base_url`, `path`, `wire`, `enabled`, `timeout_ms`, `limits`, `extra_body` and `key`; a chat provider may leave out `path` and `limits`. The gateway supplies `id`, `created_at`, `updated_at` and `last_test`; do not submit those fields. For PATCH, supply only the changes: omitted fields retain their previous values, including `key`. Creation defaults are not reapplied when you later edit `kind` or `base_url`.
+
+Here is a mock provider returned by a new local gateway, before running its first test. IDs and dates vary between databases. Although the seed records `wire: "openai"`, the mock always uses the map adapter internally.
+
+```json
+{
+  "id": "prv_ead0c0655ac61c1d1e020502",
+  "name": "mock",
+  "kind": "mock",
+  "base_url": "",
+  "path": "",
+  "wire": "openai",
+  "enabled": true,
+  "timeout_ms": 20000,
+  "limits": { "max_questions": 400, "max_choices": 64 },
+  "extra_body": {},
+  "key": { "source": "none" },
+  "send_model": true,
+  "auth_header": "authorization",
+  "created_at": "2026-11-11T17:15:56.615Z",
+  "updated_at": "2026-11-11T17:15:56.615Z",
+  "model_hints": [],
+  "test_model": null,
+  "last_test": null
+}
+```
+
+| Field                                                                    | Meaning and accepted values                                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                                                   | Unique connection name, using lowercase letters, digits and hyphens: `[a-z0-9-]+`.                                        |
+| `kind`                                                                   | Provider family: `openai`, `openrouter`, `systemone`, `openai-compatible` or `mock`.                                      |
+| `base_url`, `path`                                                       | Server address and request path. For example, native OpenRouter uses `https://openrouter.ai` and `/api/alpha/decisions`.  |
+| `wire`                                                                   | Adapter: `openai` for native Decisions, `map` for SystemOne, or `chat` for synthetic decisions from Chat Completions.     |
+| `enabled`                                                                | Boolean controlling whether the connection can serve decisions.                                                           |
+| `timeout_ms`                                                             | Positive integer timeout in milliseconds.                                                                                 |
+| `limits`                                                                 | Object with positive integer `max_questions` and `max_choices` limits.                                                    |
+| `extra_body`                                                             | Additional upstream JSON fields, such as OpenRouter routing preferences. Precedence depends on the wire, described below. |
+| `send_model`                                                             | Boolean controlling automatic model insertion for `map`. The other network wires always include the target model.         |
+| `auth_header`                                                            | Credential header, defaulting to `authorization`.                                                                         |
+| `model_hints`                                                            | Models you expect this connection to serve, as optional catalog entries; the default empty array means no hints.          |
+| `test_model`                                                             | Saved model ID for provider tests, or `null`.                                                                             |
+| `key`                                                                    | Credential source; its write and read representations differ.                                                             |
+| `synthetic_methods`, `sampling_n`, `json_transport`, `disable_reasoning` | Optional chat controls, detailed under [Upstream wires](#upstream-wires).                                                 |
+
+Every returned provider includes `send_model`, `auth_header`, `model_hints` and `test_model`, even when you omitted them from the write. Invalid values for the options described below return HTTP 400.
+
+### Credentials
+
+Choose one of these key forms when writing a provider:
+
+| Source               | Write form                                             | Read form                                                    |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
+| Environment variable | `{ "source": "env", "env_var": "OPENROUTER_API_KEY" }` | Same fields, plus boolean `present`                          |
+| Encrypted storage    | `{ "source": "stored", "value": "<secret>" }`          | `{ "source": "stored", "last4": "a1b2" }` or `"last4": null` |
+| No credential        | `{ "source": "none" }`                                 | Same object                                                  |
+
+A stored key shows its tail in `last4` only when the key is 12 characters or longer, counting Unicode code points. Any shorter key comes back with `"last4": null`, so no part of it appears in a read. The same rule holds for the provider list and for the bodies that POST and PATCH return. The console then labels the key simply as stored, with no characters shown.
+
+The server needs `GATEWAY_SECRET` to save an encrypted credential. If it is unset, POST and PATCH with a stored key return 400 without saving the change. The error's type is `invalid_request_error`, its code is `gateway_secret_missing`, and its message is `GATEWAY_SECRET must be set to store provider keys`. Branch on the code rather than the text. Environment credentials do not need this secret. [Health](/docs/reference/playground-health) reports whether it is set.
+
+With `auth_header: "authorization"`, outbound authentication uses Bearer syntax. A custom name, for example `x-api-key`, sends the credential without a prefix. Header names are normalized to lowercase. Only ASCII letters, digits and hyphens are accepted (`^[A-Za-z0-9-]+$`); `host` and `content-type` are reserved, regardless of case. Model discovery uses this same authentication setup.
+
+Custom credential header names join the gateway's redaction rules. Matching fields in captured log requests and attempt details, error excerpts and the trace's `upstream_request` or `upstream_response` become `"[REDACTED]"`. Redaction also recognizes a `name: value` credential pair inside a non-JSON upstream response body.
+
+Health's `key_present` reports whether an environment credential is set. For stored credentials and `source: "none"`, it reports `true`.
+
+### Model selection settings
+
+For `map`, `send_model` determines whether the generated request includes the target's model ID. Turning it off does not remove a `model` you put in `extra_body`. For `openai` and `chat`, the selected target model is always sent. A mock performs no network request.
+
+When you create a provider without `send_model`, it defaults to true. The exception is a `systemone` provider on a local host, such as a llama.cpp server with one loaded model: there it defaults to false. A local host is `localhost`, `127.0.0.0/8`, `::1`, `host.docker.internal`, `*.local`, `10.0.0.0/8`, `172.16.0.0/12` or `192.168.0.0/16`; the gateway reads only the host in `base_url` and does no DNS lookup. Hosted SystemOne and `openrouter` therefore start with true. Other kinds usually run on a wire that always sends the model. If you switch one of them to `map` later, its saved true value keeps adding the model until you change it.
+
+A hint can contain these fields:
+
+| Hint field                                | Validation                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `id`                                      | Required nonblank string; each ID must be unique within the list.                                 |
+| `price_per_m_input`, `price_per_m_output` | Optional finite, nonnegative prices in USD per million tokens, for input and output respectively. |
+| `context`                                 | Optional positive integer context size.                                                           |
+| `description`                             | Optional string description.                                                                      |
+
+A provider can have up to 200 hints. Unknown hint fields are rejected. Hints appear in discovery results for SystemOne, OpenAI-compatible and chat connections. They also set default prices for OpenAI-compatible and hosted SystemOne models, and for OpenAI models missing from the built-in price table; see [Cost](/docs/guides/cost).
+
+`test_model` is the model a provider test uses when the test names no model and no route targets the provider. Its value must be a nonblank string no longer than 200 characters, or `null` to have no saved choice. The default is null; PATCH with null clears it. Presets are a console feature rather than a gateway concept: when creating a connection, the console can save its preset's suggested test model. Examples are `perplexity/pplx-decider-flash-v1.2` for OpenRouter, `gpt-6-luna` for OpenAI and `d1` for Ollama. A SystemOne vendor preset suggests its cheapest hint whose model ID and price the vendor documents; a preset with no such hint suggests no test model. You can edit that setting under **Advanced**.
+
+### Model discovery
+
+Each model entry always has `id`. Depending on available information it can also contain `description`, `context`, `price_per_m_input`, `price_per_m_output`, `default_price_per_m_input` and `default_price_per_m_output`.
+
+For example, the seeded mock's models endpoint returns:
+
+```json
+{
+  "models": [
+    {
+      "id": "mock-1",
+      "default_price_per_m_input": 0,
+      "default_price_per_m_output": 0
+    }
+  ]
+}
+```
+
+Discovery depends on both kind and wire:
+
+| Connection                       | Source of models                                                                                                                          |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Non-chat `openai`                | Fixed entry `gpt-6-luna`                                                                                                                  |
+| `mock`                           | Fixed entry `mock-1`, irrespective of wire                                                                                                |
+| Non-chat `openrouter`            | Public OpenRouter catalog filtered to decisions; cached for ten minutes                                                                   |
+| Non-chat `openai-compatible`     | Upstream models URL, combined with hints when the provider has any                                                                        |
+| Non-chat `systemone`, no hints   | Single placeholder `server-configured`                                                                                                    |
+| Non-chat `systemone`, with hints | Upstream models URL, combined with hints                                                                                                  |
+| Any non-mock `chat` connection   | Upstream models URL, combined with hints; OpenRouter uses a ten-minute cache and includes chat models rather than filtering for decisions |
+
+To form the models URL, start with `base_url` and append `/models`. If `path` contains a complete `/v1` segment, append the path through that segment before `/models`. Thus `/v1/decisions` gives `{base_url}/v1/models`, while `/decisions/v1/systemone` gives `{base_url}/decisions/v1/models`. This supports servers whose configured base URL contains only a host.
+
+When combining a fetched listing with hints, the gateway places hinted models first, preserving hint order. It then appends upstream models that have not already been named. For matching IDs, the hint overrides only the fields it supplies; remaining fields come from discovery. With hints available, the fetch budget is the smaller of two seconds and `timeout_ms`; failure returns just the hints. Without hints, the budget is `timeout_ms` and failure yields an empty array. One exception is an OpenRouter chat listing served from a fresh cache: it returns those cached entries without a hint merge. Hints still affect pricing for kinds whose pricing rules use them.
+
+Catalog prices and gateway defaults serve different purposes. All four price fields use USD per million tokens:
+
+- `price_per_m_input` and `price_per_m_output` describe the catalog or hint. They appear only when a price is available. OpenRouter's `pricing.prompt` and `pricing.completion` are converted from per-token amounts.
+- `default_price_per_m_input` and `default_price_per_m_output` describe the rates used to calculate a decision's cost when its route target has no explicit override and the upstream reports no billed cost. Unknown defaults are omitted.
+
+| Kind or model                         | Default input rate       | Default output rate                                      |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------- |
+| Mock or local SystemOne               | 0                        | 0                                                        |
+| OpenAI `gpt-6-luna`                   | 0.10                     | 0 on the native `openai` and `map` wires; 0.50 on `chat` |
+| Other OpenAI model                    | Matching hint, if priced | Matching hint, if priced                                 |
+| OpenRouter                            | Catalog input price      | Catalog completion price                                 |
+| Hosted SystemOne or OpenAI-compatible | Matching hint, if priced | Matching hint, if priced                                 |
+
+For example, an unhinted OpenAI-compatible model has neither default price. The listing computes each default from the provider settings and the cached catalog, through the same function a decision calls, so the first listing, every later listing and the charge on a decision all agree. A hint price shown in `price_per_m_input` or `price_per_m_output` never becomes an OpenRouter default, because OpenRouter pricing reads only the catalog: a model named by a hint but missing from the catalog lists no default.
+
+## Provider test
+
+A provider test asks a small support-ticket classification question with a known expected answer, `billing`. It runs through ordinary decision execution, including logging and the configured chat methods where applicable, but uses `<provider name>::<model>` to address the provider directly. Routes do not execute. The console's **Models** test uses the same question through a route in the playground.
+
+The test input and choices are defined by the gateway as follows:
+
+```json
+{
+  "input": "I was charged twice for my March invoice. Please refund the second charge.",
+  "questions": [
+    {
+      "name": "department",
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "choices": [
+        { "value": "billing", "description": "Charges, invoices and refunds." },
+        { "value": "technical", "description": "Bugs, errors and outages." },
+        { "value": "other", "description": "Anything else." }
+      ]
+    }
+  ]
+}
+```
+
+The first applicable row chooses the test model. The result reports the reason in `model_reason`.
+
+| Priority | Reason              | Selection rule                                                                                                                                                                       |
+| -------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1        | `requested`         | Use `model` from the test body. Empty, whitespace-only and non-string values return 400 before execution.                                                                            |
+| 2        | `used_by_route`     | Inspect routes in stored order that target this provider. Prefer the first enabled route; if all are disabled, use the first matching route. Take its first target on this provider. |
+| 3        | `provider_default`  | Use the saved `test_model`.                                                                                                                                                          |
+| 4        | `hint`              | Use the first hint's ID.                                                                                                                                                             |
+| 5        | `cheapest`          | From discovery, choose the lowest `price_per_m_input`; sort equal prices by ID.                                                                                                      |
+| 6        | `first_listed`      | Use the first discovered model. Exclude the `server-configured` placeholder from catalog choices.                                                                                    |
+| 7        | `server_configured` | Use the ID `server-configured`, leaving model selection to the server.                                                                                                               |
+
+Only the catalog-based choices require reading the models listing, which can trigger an upstream fetch. The first four choices avoid it. `model_route` contains the selected route's alias only for `used_by_route`; otherwise it is null.
+
+These are the verdict fields captured from a local mock test with `{ "model": "mock-1" }`. The complete result also contains `response` and `trace`.
+
+```json
+{
+  "ok": true,
+  "latency_ms": 15,
+  "model": "mock-1",
+  "model_reason": "requested",
+  "model_route": null,
+  "expected": "billing",
+  "answer": "billing",
+  "probability": 0.96,
+  "matched": true
+}
+```
+
+`ok` means a decision response exists, not that its answer was correct. `matched` compares the chosen value with `expected`. `probability` is the returned probability of that chosen value. If execution fails or the question is refused, `answer` and `probability` are null and `matched` is false. A successful decision is included as `response`; on execution failure that field is absent and `error` contains the decision's error message. `trace` uses the playground structure: `attempts`, `upstream_request` and `upstream_response`.
+
+The provider's `last_test` persists both successful and failed tests. Until the first test it is null. Its fields are `ok`, `at` (test start), `latency_ms` (decision duration), `model`, `model_reason`, `matched` and `error` (null for success, otherwise the failure message). Older saved results without the reason and match fields expose those two as null. Validation errors before execution, such as an invalid model, leave the saved test untouched. Tests do not alter health status.
+
+## Upstream wires
+
+The wire selects the request and response adapter. Native `openai` and `map` connections use Decisions endpoints; `chat` builds probability distributions from Chat Completions.
+
+### Native adapters
+
+For `openai`, the gateway forwards the decision request with the route target's upstream model. `extra_body` supplies additional fields, but the decision's own fields and selected model take precedence. Answers are an array aligned with the questions. Each non-refusal answer must identify its question with `name` and `type`. Choice answers contain `choice` and a probability list; predicates contain `probability`; scores have a probability list whose `value` entries are zero-based level indexes. Confidence and usage are also read. Usage uses `input_tokens`, `output_tokens`, `total_tokens` and optional token details.
+
+Compatibility parsing also accepts the earlier gateway format: `question` instead of `name`, `value` instead of `choice`, a probability object keyed by option value or score label/index, and `prompt_tokens` with `total_tokens` for usage.
+
+The `map` adapter, used for SystemOne and native OpenRouter, sends input as `state` and a `questions` object keyed `q0`, `q1`, etc. It adds `model` according to `send_model`. Generated `state` and `questions` override same-named `extra_body` fields. Question conversion is:
+
+| Public question | Map-wire representation                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| Choice          | `type: "choice"`, `instructions`, and `criteria` mapping `o0`, `o1`, etc. to option descriptions |
+| Predicate       | `type: "noul"` and `instructions`, without criteria                                              |
+| Score           | `type: "score"`, `instructions`, and a criteria array of descriptions in level order             |
+
+Score criteria must be an array: position zero means level zero. OpenRouter rejects an object in its place with 400.
+
+Map responses have an `answers` object with the same question IDs, plus optional `usage`, `model`, `provider` and `id`. Choice probabilities are keyed by option ID and `choice` names the selected ID. Predicates return `noul`; older peers may use `probability`. Scores key probabilities by index strings (`"0"`, `"1"`, etc.); the older `l0`, `l1` form is also accepted. Their own `score` and `legend` fields are ignored. Choice and score responses can provide `confidence`. Map usage normally includes `input_tokens`, `output_tokens` and billed `cost`; older peers can use prompt/total counts. An explicit `total_tokens` wins; otherwise the gateway adds input and output counts. See [Cost](/docs/guides/cost) for billed costs.
+
+Both native parsers ignore extra upstream fields, including `legend`, `id`, `is_byok` and `cost_details`. Null confidence is treated as missing. A cost that is not a finite nonnegative number is ignored, as are model/provider names that are not nonblank strings. However, missing answers, unknown choice IDs or values, out-of-range probabilities, distributions farther than 0.02 from a sum of one, and invalid token counts reject the response. Counts must be nonnegative integers. An OpenAI non-refusal answer with the wrong question identity also fails validation. These errors become `upstream_error` with a brief response excerpt and allow the next route target to run.
+
+The mock bypasses the network and always exercises the map parser, regardless of its stored wire. It hashes the input for deterministic answers: predicate probabilities in `noul`, choice probabilities under option IDs, and score distributions and legends under level indexes. Choices and scores include confidence. Usage reports an input estimate from the supplied text, one output token per question and zero cost. The top-level model is the target model and the provider name is `Mock`. Public mock responses therefore have `served_by: "Mock"`, `cost_basis: "upstream_cost"` and `cost_usd: 0`. The mock rejects non-array score criteria with HTTP 400. For the exact known-answer question above, it bypasses hashing: `billing` receives 0.96 and the alternatives share the remaining 0.04 equally, so the test passes.
+
+### Chat configuration
+
+The `chat` wire works with any OpenAI-style Chat Completions endpoint. It is meant for the `openai`, `openrouter` and `openai-compatible` kinds. When you create a chat provider without `path` or `limits`, the gateway saves the defaults below. It saves the other settings only if you send them: reads leave them out, and each call applies the default.
+
+| Setting             | Default and validation                                                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`              | OpenRouter: `/api/v1/chat/completions`. Otherwise, `/chat/completions` if `base_url` ends with `/v1`, or `/v1/chat/completions` if it does not. |
+| `limits`            | 16 questions and 64 choices; the choice default becomes 20 when `synthetic_methods` contains only `logprobs`.                                   |
+| `synthetic_methods` | Ordered list `logprobs`, `sampling`, `json`. Must contain at least one method, without duplicates or other names.                               |
+| `sampling_n`        | 8; accepts integers from 2 through 32.                                                                                                          |
+| `json_transport`    | `auto`; alternatives are `json_schema` and `prompt`.                                                                                            |
+| `disable_reasoning` | Resolved per call: true for OpenRouter, false for every other kind. An explicit value must be boolean.                                          |
+
+You can change the method order or remove methods. POST and PATCH validate these settings; for example, a logprobs-only chat connection cannot have `max_choices` greater than 20. Native wires do not use the synthetic controls.
+
+To use OpenAI or OpenRouter chat models, start from the `openai-chat` or `openrouter-chat` seed, or from the matching chat-endpoint preset in the console. These are separate providers, so the native ones keep working. You can also switch a native provider to `chat`. If that PATCH has no `path`, the gateway swaps the old path for the chat default. The seeded OpenAI base URL is `https://api.openai.com/v1`, so its chat path is `/chat/completions`. Paths can be edited afterwards. OpenAI chat models without a built-in rate need a route price or hint to be priced; selecting chat adds no built-in prices.
+
+Chat execution repeats a common prefix: fixed system instructions, then a user message holding the input, then the question-specific material. This arrangement lets upstream prompt caches reuse input across questions. The selected model always wins over `extra_body`. Other chat request fields can be overridden by `extra_body`; supplying `max_completion_tokens` suppresses the default `max_tokens`. Overrides for `logprobs` and `top_logprobs` reach only logprobs calls and are removed for sampling and JSON. The gateway inserts neither tools nor tool_choice automatically.
+
+A provider attempt permits up to eight HTTP calls at once. One timeout covers its calls, method changes and transport retries. If any question has no remaining usable method, the attempt fails and normal route fallback applies. There is one attempt-log entry for the provider, rather than an entry per HTTP call. A successful trace contains the sent requests, answered responses and bypassed refusals; a failed trace keeps the planned request and any available failure response.
+
+### Synthetic methods
+
+Each question follows the saved method order until it can be answered. Encountering `json` queues that question for a batch after the other questions have been processed. A failed JSON batch ends the attempt; even if methods were configured after `json`, they do not run.
+
+**Logprobs.** One request per question asks for a plain label with `logprobs: true`, `top_logprobs: 20` and `max_tokens: 1`. Choice labels run A through T, predicate labels are Yes and No, and score labels are indexes 0 through 9. Choices above 20 skip this method. Instructions require a label without JSON wrapping, quotes or punctuation; sampling uses the same instruction to prevent responses such as `{"output":"2"}`.
+
+The parser normalizes whole tokens from the first generated token's `top_logprobs` using the label rules below. For each label it adds the exponentials of matching logprobs, then divides by the total matching mass. Unseen labels receive zero. Generated content must itself be a label, even if the logprob entries look usable. Missing logprobs, no matching mass or non-label content advances the question. Discovering missing logprobs disables that method for questions still queued; calls already running may finish. A message refusal or `finish_reason: "content_filter"` fails the attempt. Answers from this method report `confidence_method: "logprobs"`.
+
+HTTP errors have two special interpretations during logprobs:
+
+- A 4xx that names `logprobs` without `top_logprobs` means the feature is unsupported and advances the question, disabling logprobs for queued work. A non-400 4xx naming `top_logprobs` is handled as unsupported too.
+- A 400 naming `top_logprobs`, or an opaque 400 naming neither logprobs nor another request parameter/model, is treated as a top-logprobs limit rejection. This covers responses like `Provider returned error` from hosts such as Fireworks and Novita.
+
+Some OpenAI reasoning models respond to a `logprobs` request with HTTP 400 because they do not support that parameter; the first rule lets the question try its next method.
+
+For the opaque-400 check, the gateway scans the JSON-serialized error body case-insensitively for whole words: `messages`, `model`, `max_tokens`, `max_completion_tokens`, `temperature`, `response_format`, `json_schema`, `reasoning`, `reasoning_effort`, `tools`, `tool_choice`, `stop`, `seed`, `context_length` and `context length`. Finding one prevents the opaque classification; explicitly naming `top_logprobs` still identifies that rejection.
+
+After such a rejection, the gateway can retry once with `top_logprobs: 5`. It does so only when the rejected request asked for more than five and the question has five options or fewer (a predicate has two). The retry value replaces any `extra_body.top_logprobs`. The other cases move the question to its next method:
+
+- A question with more than five options moves on without a retry.
+- If the rejected request already asked for five or fewer, the question moves on and logprobs is turned off for the questions still waiting.
+- If the retry gets another such 400, or a 4xx saying logprobs is unsupported, the same happens.
+
+Once a retry succeeds, later calls in the attempt ask for five from the start, and questions with more than five options skip logprobs. Calls that were already built in parallel may still use the old value. To avoid the first rejection, set `extra_body.top_logprobs: 5` yourself.
+
+Only HTTP 400 qualifies for the limit retry. Other errors retain normal failure handling unless they explicitly identify unsupported logprobs as described above. Examples are authentication errors (401/403), 404, 422, 429, 5xx, network failures and timeouts, whether they hit the initial logprobs request or its retry. A 400 identifying a different parameter or model fails too. For ordinary HTTP failures, 400 and 422 stop the route; other statuses allow fallback. Sampling and JSON retain that ordinary rule, apart from the specific retries documented here. Bypassed HTTP refusals are retained under `refused` and contribute no gateway usage or cost.
+
+**Sampling.** Each question requests `n: sampling_n`, temperature 1 and a default allowance of eight output tokens per sample. If the upstream returns fewer completions than requested, bounded parallel `n: 1` calls fill the gap. The parser consumes no more than `sampling_n` completions.
+
+Choice labels use A through Z for up to 26 options; larger choice sets use numbers 1 through 64. Predicates use Yes/No and scores use 0 through 9. Before matching, the gateway trims whitespace, ignores case, strips one matching pair of quotes or backticks and drops one final period, inside or outside the quotes. What is left must be exactly one label. Real models often end a label with a period, so `Yes.` is usable, while `Yes!` and `{"output":"Yes"}` are not.
+
+If fewer than half the requested samples are valid, the question advances to the next method. Otherwise label counts divided by the valid sample count give the probabilities, without smoothing. Resolution is nominally `1/sampling_n`. It becomes coarser when invalid samples reduce the denominator. Zero and one describe observed frequency, not certainty. These answers use `confidence_method: "sampling"`.
+
+**JSON estimates.** All deferred questions share one call for each transport attempted. Keys such as `q0` and `q1` refer to original question positions. Choice and score estimates are integer percentage arrays in option/level order; a predicate is a single integer percentage for Yes. For instance, the compact shape can be `{ "q0": [70,30], "q1": 90, "q2": [10,25,45,20] }`.
+
+Every requested key must appear with no extras. Percentages must be integers in 0..100, arrays must have the correct lengths and their total must be positive. Array values are renormalized rather than required to sum to 100. Bad probability shapes, missing keys or unparseable content after available transport retries fail the attempt. The default output budget grows with question and option counts. These are the model's own probability estimates, with `confidence_method: "json"`; evaluate calibration against your examples.
+
+| Transport     | Request and parsing                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `json_schema` | Sets `response_format` to type `json_schema`, with schema name `answer`, `strict: true` and the compact question schema. Parses message content directly. |
+| `prompt`      | Omits an automatic response format, asks for JSON using the compact schema, and extracts the first JSON object from message content.                      |
+| `auto`        | For every kind, tries `json_schema` first and then `prompt` when eligible.                                                                                |
+
+With `auto`, the attempt can switch transport once: when a 4xx names `response_format` or `json_schema`, or when the `json_schema` reply does not parse as a JSON object. It does not retry an object with invalid probability fields. Explicit transport choices never switch. Refusals and content-filter responses terminate immediately, and other HTTP failures follow ordinary fallback rules, including the route stop for 400/422.
+
+Synthetic distributions yield confidence `1 - H(p)/ln(K)`. It measures how concentrated the probabilities are, not whether the answer is correct. Choice answers select the largest probability and break ties by option order; predicates return P(Yes); scores return the expected zero-based level index. A completed chat attempt sets `gateway.synthetic` to true; other answers have false. Response-level confidence reports the shared method, `mixed` when methods differ, or `none` when no answer provides confidence.
+
+### Reasoning controls
+
+Many open models reason before they answer unless told not to. The chat wire allows only a few output tokens, so that reasoning can use them all and the call comes back with no label. `disable_reasoning: true` asks the upstream to skip reasoning on every chat call the gateway makes, including logprobs, sampling, extra sampling calls and the JSON batch. An omitted setting resolves from kind at execution time, and remains absent on reads. OpenRouter defaults to requesting off; OpenAI, OpenAI-compatible and other kinds default to leaving it alone.
+
+| Kind                          | Automatically inserted field when off is requested                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `openrouter`                  | `reasoning: { "enabled": false }`, OpenRouter's published reasoning control, only with catalog-confirmed support |
+| `openai`, `openai-compatible` | `reasoning_effort: "none"`, a Chat Completions field in OpenAI's API reference                                   |
+| Any other kind                | No automatic reasoning field                                                                                     |
+
+OpenRouter support means the cached entry for the target model lists `reasoning` or `include_reasoning` in `supported_parameters`. An expired entry is still usable. Models listing neither parameter, models absent from the catalog and catalog-fetch failures all suppress the automatic field. This avoids excluding hosts through `extra_body.provider.require_parameters: true` when the model has no reasoning control. Examples of model IDs that can lack those catalog parameters include `meta-llama/llama-4-maverick`, `mistralai/mistral-small-3.2-24b-instruct` and `meta-llama/llama-3.1-8b-instruct`; inspect your provider's listing rather than assuming support from the ID.
+
+OpenAI reasoning models from GPT-5.1 on take the value `none`, but older models and models that do not reason may refuse it. That is why the field is opt-in for these kinds. Supplying either `reasoning` or `reasoning_effort` in `extra_body` disables all automatic reasoning fields and their special retry. Your override then stays in control.
+
+Some hosts refuse to turn reasoning off. When a call that included the automatic field gets back a 4xx with that message, the gateway tries it once more. The gateway spots this error by finding the word `reasoning` with `mandatory`, `required` or `cannot be disabled` after it in the same sentence. Hosts such as Venice, Together, Parasail and Fireworks send errors of this kind, for example `Reasoning is mandatory for this endpoint and cannot be disabled.`
+
+The retry requests low effort: `reasoning: { "effort": "low" }` on OpenRouter, or `reasoning_effort: "low"` on OpenAI and compatible servers. It adds 2048 to the default output allowance: 2049 for logprobs, 2056 for sampling and the ordinary JSON bound plus 2048. Explicit `max_tokens` or `max_completion_tokens` in `extra_body` takes precedence. Later calls in the attempt use that low-effort mode; calls already built concurrently may still use the earlier setting. Label parsing still trims newlines; if no usable label arrives, the usual method transition applies. The first refusal stays in `refused` without usage or assigned cost. Answered retries count normally. A retry failure goes through the active method's usual error and fallback handling.
+
+### Chat usage and catalog access
+
+Usage combines every answered HTTP call, including sampling fills and retries. Prompt, completion and total token fields become public input, output and total counts; their detail counters are summed too. A multi-completion `n` request uses the upstream's input count as reported, without multiplication by n. Bypassed HTTP errors for unsupported logprobs, top-logprobs limits, response formats or mandatory reasoning are trace-only refusals, excluded from gateway usage and cost totals.
+
+If any answered call lacks usage, the public usage value is null. Input estimation then counts the actual chat message text sent, including repeated input. Billed `usage.cost` is summed only when every answered call supplies a valid amount; the sum is rounded at twelve decimal places to remove floating-point artifacts below billing precision. If not, the gateway prices the total input tokens, or its estimate, at the input rate and the total output tokens at the output rate. Without usage nobody knows the output count; `cost_includes_output` is then true only for a zero output rate. Failed attempts receive no assigned gateway cost, even though an upstream may charge for them. Upstream model and provider names are retained only when all answered calls agree on each name.
+
+OpenRouter chat decisions consult a catalog for reasoning support and price defaults. If this provider has no cached catalog since startup, the decision first fetches its models URL using the provider credential. The wait is capped at the smaller of two seconds and `timeout_ms`. Concurrent attempts share an in-flight fetch. The listing is cached for ten minutes, as with the models endpoint, but decision execution continues reading expired entries instead of refreshing them.
+
+This preliminary fetch adds to attempt latency but runs outside the attempt's upstream timeout. A failed fetch (network error, timeout, non-success status or unreadable body) cannot fail the decision. Execution continues without automatic OpenRouter reasoning fields or catalog prices. Cost is then estimated or unpriced, as applicable. After failure, decisions wait five minutes before trying another catalog fetch. The models endpoint remains free to refresh it. No other kind/wire combination fetches a catalog during decision execution; native discovery keeps the rules above.
+
+### Seeds and existing databases
+
+A fresh database contains native `mock`, `openai` and `openrouter` providers, plus disabled `llamacpp`. The first three have `send_model: true`; `llamacpp` has false. None has a saved test model. The fresh database also has a disabled `typesafe` provider: a SystemOne connection with the `TYPESAFE_API_KEY` credential and Jev hints. Migration 6 adds that provider once to older databases. It creates no route, skips a database that already has a provider at `https://api.typesafe.ai`, and does not restore the provider after you delete it. The [TypeSafe and Jev guide](/docs/guides/typesafe) covers settings and name collisions.
+
+Two additional disabled connections let you opt into chat without altering the native seeds:
+
+| Name              | Kind         | Base URL                    | Path                       | Environment credential |
+| ----------------- | ------------ | --------------------------- | -------------------------- | ---------------------- |
+| `openai-chat`     | `openai`     | `https://api.openai.com/v1` | `/chat/completions`        | `OPENAI_API_KEY`       |
+| `openrouter-chat` | `openrouter` | `https://openrouter.ai`     | `/api/v1/chat/completions` | `OPENROUTER_API_KEY`   |
+
+Each is an independent provider with its own key setting, not a link to its native counterpart; sharing an environment variable simply supplies the same credential. Neither has a route. Both set `wire: "chat"`, `send_model: true`, `auth_header: "authorization"`, a 20000 ms timeout, limits of 16 questions and 64 choices, and an empty `extra_body`. They have no hints or saved test model. Their omitted synthetic settings give the method order logprobs/sampling/JSON, eight samples and auto JSON transport. Omitted reasoning control resolves to true for `openrouter-chat` and false for `openai-chat`.
+
+Migration 7 adds these providers once on existing databases, preserving every existing connection. It skips a seed when a provider already matches its kind, chat wire and base URL after trailing-slash removal. If only the name conflicts, it chooses the first free numeric suffix starting at 2, such as `openai-chat-2` or `openrouter-chat-3`. A deleted seed is not restored on subsequent startups. For each provider it adds, the gateway logs one line at startup: `Added the disabled provider "<name>": <kind> chat models as synthetic decisions, key from <ENV_VAR>.` New databases already contain these providers and emit no such messages.
+
+Migration 8 brings keys saved by older releases, which kept the last four characters of any key, under the 12-character rule. It runs once. Each stored key is decrypted and its `last4` is worked out again. If a key cannot be decrypted during that start (for example, `GATEWAY_SECRET` is missing or was changed), it keeps its tail only when the length of its ciphertext proves at least 12 characters; otherwise `last4` becomes null. Only the displayed tail changes: the encrypted key still works, and storing the key again sets a fresh tail. Keys read from environment variables are left alone.
+
+Older rows also receive compatibility defaults once. For map-wire connections predating `send_model`, migration preserves the earlier behavior: OpenRouter sends a model; every other map provider, including `llamacpp`, does not. Old openai-wire connections retain true. The default credential header is `authorization`; hints are empty when absent, and an absent `test_model` reads as null. Already-saved options are kept.
+
+### Retirement of the former local seed
+
+Earlier releases included an OpenAI-compatible connection to `http://host.docker.internal:8000/v1`, path `/decisions`. Migration 4 now only records completion; migration 5 performs retirement once at startup even on a database where 4 already ran.
+
+An address match alone cannot identify this seed. Migration 5 also requires kind `openai-compatible`, wire `openai`, no credential (`source: "none"`), and a creation timestamp that is both the earliest provider timestamp and shared with another provider. The stored name is irrelevant. A later connection at that URL is preserved without a message. So is a provider left alone after the other providers from its seed batch were deleted. No matching provider means no message either.
+
+If an enabled mock exists, the migration picks the first one in stored order (creation date does not matter) and updates every route that used the old provider:
+
+- If the route already targets some mock, enabled or not, it keeps that mock target and loses its targets on the old provider.
+- If not, its first target on the old provider is moved to the chosen mock with model `mock-1`. The target keeps its `timeout_ms` and `price_per_m_output` but loses `price_per_m_input`. Any further targets on the old provider are removed.
+- Other targets stay in the same order.
+
+Next the migration removes the old provider and logs a single line with its saved name and the changed routes, or notes that no route referred to it. When there is no mock at all, nothing changes and the startup line says there is no mock to take the routes. When every mock is disabled, nothing changes either, and the line says the mock is off and the routes stayed where they were. The match rules above keep the migration from deleting a provider you created yourself, and the mock checks keep it from deleting a provider that routes still need.

@@ -1,0 +1,46 @@
+---
+title: Introduction
+description: Unified self-hosted API gateway for decision models.
+---
+
+Decision models, such as Jev, give your code an answer it can use directly: a category, a yes or no, or a score. OpenAI offers them through its Decisions API.
+
+With dgateway, your app calls a single API, and you choose any model behind it: OpenAI, OpenRouter, TypeSafe, another hosted vendor, or one on your own machine. You can switch models without changing your code.
+
+Your app sends its questions to `POST /v1/decisions`. You set the order in which providers are tried. Each response names the provider and model that answered, lists each attempt, and gives the token usage and the cost in US dollars.
+
+## Try it
+
+Start the container. Before you use it beyond a local trial, replace the `ADMIN_TOKEN` and `GATEWAY_SECRET` values with two different long random strings. Keep `GATEWAY_SECRET` the same over time: it encrypts the provider keys you store.
+
+```sh
+docker run -d --name dgateway \
+  -p 127.0.0.1:8790:8790 \
+  -v dgateway-data:/data \
+  --add-host host.docker.internal:host-gateway \
+  -e ADMIN_TOKEN=replace-with-a-long-random-token \
+  -e GATEWAY_SECRET=replace-with-a-separate-stable-secret \
+  ghcr.io/buddylabsai/dgateway:latest
+```
+
+Your app names a route in the `model` field, and the route decides which models answer. A new install has a test route named `default`. It answers with a built-in mock instead of a real model, so you need no API key. [Send it a request and see the full response](/docs/guides/getting-started).
+
+To connect real models, open the console at [http://127.0.0.1:8790/](http://127.0.0.1:8790/) and sign in with the admin token. There you can add providers, test them and choose which ones answer each route.
+
+dgateway runs as one process and serves the API and the console on port 8790 by default. It keeps its settings and logs in SQLite.
+
+## Find your next step
+
+- [Routes and fallback](/docs/guides/routing): your app keeps one route name while you choose the providers behind it and their order. Each response lists every attempt.
+- [Cost](/docs/guides/cost): see what each decision cost and where the number came from (billed, token-priced, estimated or unpriced).
+- [Local and hosted models](/docs/guides/providers): keep a route on your own machine, or choose a hosted provider as the fallback.
+- [Security](/docs/guides/security): stored provider keys are encrypted, and payload capture is off by default.
+- [Decision questions](/docs/reference/decisions): `choice`, `predicate` (yes/no) and `score` questions return probabilities, so you do not parse free-form chat text. [Synthetic decisions](/docs/guides/synthetic-decisions) explains how chat models can answer them too.
+
+## Limits
+
+- It has no chat-completions endpoint, so chat apps and code editors cannot use it as a model server. It can still call chat models to answer questions.
+- It does not stop spending at a budget. Set limits with your providers where they offer them.
+- It does not choose the best model for a task. You choose the providers and their order, and you test them.
+- `confidence` is not proof that an answer is right. Test your provider, model, instructions and thresholds on examples you have labelled yourself before you rely on them.
+- It is built for one operator who runs it for their own apps.

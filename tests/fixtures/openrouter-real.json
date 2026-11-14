@@ -1,0 +1,87 @@
+{
+  "captured_2026_11_08_live": {
+    "request_choice_predicate": {
+      "state": "I was charged twice for my subscription.",
+      "questions": {
+        "q0": {
+          "type": "choice",
+          "instructions": "Which team?",
+          "criteria": { "o0": "Payments", "o1": "Bugs" }
+        },
+        "q1": { "type": "noul", "instructions": "Is it urgent?" }
+      },
+      "model": "perplexity/pplx-decider-flash-v1.2"
+    },
+    "response_choice_predicate": {
+      "model": "perplexity/pplx-decider-flash-v1.2-20261016",
+      "answers": {
+        "q0": {
+          "type": "choice",
+          "choice": "o0",
+          "probabilities": { "o0": 0.8708197184652482, "o1": 0.1291802815347518 },
+          "confidence": 0.7416394369304964
+        },
+        "q1": { "type": "noul", "noul": 0.44030027324867504 }
+      },
+      "usage": {
+        "input_tokens": 177,
+        "output_tokens": 2,
+        "cost": 1.77e-6,
+        "is_byok": false,
+        "cost_details": {
+          "upstream_inference_cost": 1.77e-6,
+          "upstream_inference_prompt_cost": 1.77e-6,
+          "upstream_inference_completions_cost": 0
+        }
+      },
+      "id": "gen-dec-example-1",
+      "provider": "Perplexity"
+    },
+    "score_with_keyed_criteria_rejected": {
+      "status": 400,
+      "error": {
+        "message": "[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"questions\",\"q0\",\"criteria\"],\"message\":\"Invalid input: expected array, received object\"}]",
+        "code": 400
+      }
+    }
+  },
+  "documented_example_openrouter_docs": {
+    "request_score": {
+      "urgency": {
+        "criteria": [
+          "Can wait for the next release",
+          "Should be fixed this week",
+          "Blocking revenue right now"
+        ],
+        "instructions": "How urgent is this ticket?",
+        "type": "score"
+      }
+    },
+    "response": {
+      "answers": {
+        "is_bug": { "noul": 0.96, "type": "noul" },
+        "team": {
+          "choice": "payments",
+          "confidence": 0.75,
+          "probabilities": { "account": 0, "frontend": 0.16, "payments": 0.84 },
+          "type": "choice"
+        },
+        "urgency": {
+          "confidence": 0.99,
+          "legend": {
+            "0": "Can wait for the next release",
+            "1": "Should be fixed this week",
+            "2": "Blocking revenue right now"
+          },
+          "probabilities": { "0": 0, "1": 0.01, "2": 0.99 },
+          "score": 1.99,
+          "type": "score"
+        }
+      },
+      "id": "gen-dec-example-2",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "usage": { "cost": 0.000019992, "input_tokens": 476, "output_tokens": 70 }
+    }
+  }
+}

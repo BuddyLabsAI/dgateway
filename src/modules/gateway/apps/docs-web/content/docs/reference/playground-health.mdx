@@ -1,0 +1,45 @@
+---
+title: Playground and admin health
+description: Run a traced decision and inspect configuration health.
+---
+
+The playground runs one decision and returns a trace of what the gateway sent and received. Admin health reports the gateway version, its uptime and the credential status of each provider. Both require `Authorization: Bearer <ADMIN_TOKEN>`. A missing or wrong token produces 401. Requests and responses use JSON, timestamps use ISO-8601, and normal errors contain `error.message`, `error.type` and optional `error.code`.
+
+## Tested example
+
+With `ADMIN_TOKEN` set, run the script against a gateway. `BASE_URL` defaults to `http://127.0.0.1:8790`. It calls the seeded `default` route, then asks for a route that does not exist, and finally reads admin health. The second call shows that a failed decision still returns HTTP 200. Playground decisions go through normal routing and appear in the log.
+
+<include cwd lang="sh">
+  snippets/playground-health.sh
+</include>
+
+## Playground
+
+Send `{ "request": DecisionRequest }` to `POST /admin/api/playground`. The response contains `response` (a `DecisionResponse` or `null`) and `trace`. On a decision failure it also contains `error` with `message` and `type`.
+
+`trace.attempts` has the same attempt records as `gateway.attempts`. `trace.upstream_request` is the last attempt's wire body, which may be an array for chat, or null. `trace.upstream_response` is its raw JSON value or text, or null.
+
+A decision that fails, for example because the route does not exist or every target failed, still gets HTTP 200. In that case `response` is null, `error` explains the failure and `trace.attempts` lists what was tried. An invalid `request` returns HTTP 400; a bad admin token returns HTTP 401. Both use the normal error body. Unexpected server failures return HTTP 500 with `{ "error": { "message": "Internal server error", "type": "server_error" } }`.
+
+### Redaction
+
+The gateway replaces the key of every provider it tried wherever it appears in traces, captured log payloads and error excerpts.
+
+In traces and captured requests, it also hides a field's value when the name, or a part between `_` or `-` separators, matches a credential name (in any case):
+
+- `authorization`, `api_key`/`apiKey`, `key`, `secret`, `token`, `access_token`, `refresh_token`, `auth_token`, `password` or `credential`.
+- An account identifier such as `user_id`, `account_id`, `org_id`, `customer_id` or `session_id`.
+
+It also hides values under the provider's custom auth header name. In plain-text upstream replies and error excerpts, it redacts credential name-value pairs and recognizable keys and account IDs.
+
+One exception keeps log-probability data readable. In `logprobs.content[].token` and `top_logprobs[].token`, a `token` field stays visible when the same entry has a numeric `logprob`, so a trace can show `"token": "A"`. The `bytes` field next to it also stays. Provider keys are still replaced inside such tokens.
+
+Captured decision responses get key replacement only, not field-name redaction. Redaction cannot find every secret: sensitive text in prompts or upstream replies can remain. Limit who can read traces and captured payloads.
+
+## Health
+
+`GET /admin/api/health` returns `ok`, `version`, `uptime_s`, `secret_configured`, and a `providers` array. Each provider entry contains `name`, `enabled` and `key_present` (see [Credentials](/docs/reference/providers#credentials) for what `key_present` means). `ok` is true, the version is `0.1.0`, and `uptime_s` is the number of whole seconds since the gateway started.
+
+`secret_configured` is true when the gateway process has `GATEWAY_SECRET`. It is only a flag: no endpoint returns the secret itself. Redaction does not search text for the secret, so if someone puts it in decision input, captured payloads and logs can hold it.
+
+While `secret_configured` is false, the gateway rejects stored provider keys (see [Credentials](/docs/reference/providers#credentials)). A client can read this flag first, tell the user before they paste a key, and suggest an environment variable credential.

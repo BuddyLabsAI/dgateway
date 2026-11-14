@@ -1,0 +1,58 @@
+---
+title: Logs and statistics
+description: Filter request logs and inspect latency, fallback and cost totals.
+---
+
+The log keeps one entry per decision request, so you can see what each request did. Statistics add up those entries over a time window. These endpoints require `Authorization: Bearer <ADMIN_TOKEN>`; a missing or incorrect token returns 401.
+
+Requests and responses use JSON. Timestamps use ISO-8601. Errors contain an `error` object with `message`, `type`, and optional `code`.
+
+## Tested example
+
+Make a decision first so the log has an entry. With `ADMIN_TOKEN` set, this script prints a page of logs and statistics for the last hour. `BASE_URL` defaults to `http://127.0.0.1:8790`.
+
+<include cwd lang="sh">
+  snippets/observability.sh
+</include>
+
+## Logs
+
+`GET /admin/api/logs?limit=50&before=<id>&route=<alias>&provider=<name>&status=ok|error&fallback=used|none` returns `{ "items": [LogEntry], "next_before": "<id>" | null }`. Entries come newest first. To get the next page, pass the returned `next_before` as `before`; a `null` value means there are no more entries.
+
+`limit` is an integer from 1 to 1000 and defaults to 50. All filters are optional and combine. The gateway applies them before pagination, so each page holds up to `limit` matching entries.
+
+`fallback=used` keeps entries with `fallback_used: true`, and `fallback=none` keeps those with `false`. An empty value for `status` or `fallback` means no filter; any other value returns 400.
+
+`fallback_used` is true whenever the request made more than one attempt, even if all of them failed and `status` is `"error"`.
+
+| Log entry fields                                           | Meaning                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`, `ts`                                                 | Log identifier and timestamp.                                                                                                                                                                                                              |
+| `route`, `provider`, `upstream_model`                      | Route alias, provider and target model.                                                                                                                                                                                                    |
+| `served_by`, `upstream_model_resolved`                     | The answering response's `gateway.served_by` and `gateway.upstream_model_resolved`. Both are `null` on failure, when the upstream supplies no value, or on older entries from before these fields existed.                                 |
+| `status`, `http_status`, `error`                           | `status` is `ok` or `error`; the entry also records the HTTP status and any error text.                                                                                                                                                    |
+| `fallback_used`, `attempts`                                | Whether the request moved to a later attempt, and the attempts in the same form as `gateway.attempts`.                                                                                                                                     |
+| `latency_ms`, `questions`, `prompt_tokens`                 | Latency, question count and the answer's `usage.input_tokens` (`null` when unavailable).                                                                                                                                                   |
+| `cost_usd`, `cost_basis`, `cost_includes_output`, `tokens` | Cost information for the answering attempt (see [Cost](/docs/reference/decisions#cost)). All four are `null` on failure and on entries predating cost tracking. `cost_includes_output` is also `null` on entries predating output pricing. |
+| `request`, `response`                                      | Captured payloads, present only when `settings.capture_payloads` was enabled at the time.                                                                                                                                                  |
+
+For answered requests `cost_basis` is one of `upstream_cost`, `upstream_tokens`, `estimated_tokens` or `unpriced`; `cost_usd` may be `null`. `cost_includes_output` may be true, false or null, and `tokens` may be null. Historical `free` log rows read as `unpriced`, retaining their recorded cost of 0 and output flag; they count as unpriced in statistics without changing stored rows.
+
+## Stats
+
+`GET /admin/api/stats?window=1h|24h|7d` returns totals for the window, the same totals grouped by provider and by route, and a timeseries that splits the window into exactly 24 buckets. `window` defaults to `24h`; any value other than `1h`, `24h` or `7d` returns 400.
+
+| Location                 | Fields                                                                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Top level                | `window`, `requests`, `errors`, `p50_ms`, `p95_ms`, `fallbacks`, `fallbacks_answered`, `cost_usd`, `unpriced`, `output_unpriced`, `by_provider`, `by_route`, `timeseries`. |
+| Each `by_provider` entry | `provider`, `requests`, `errors`, `p50_ms`, `cost_usd`, `unpriced`, `output_unpriced`.                                                                                     |
+| Each `by_route` entry    | `route`, `requests`, `errors`, `p50_ms`, `cost_usd`, `unpriced`, `output_unpriced`.                                                                                        |
+| Each `timeseries` bucket | `t`, `requests`, `errors`, `p50_ms`, `p95_ms`, `fallbacks`, `fallbacks_answered`, `cost_usd`. There are no unpriced counters in buckets.                                   |
+
+When a window or bucket has no requests, its latency percentiles are `null`, not zero. A bucket's `p95_ms` uses only the requests in that bucket, with the same nearest-rank method as the window value. The provider and route groups list only providers and routes that had requests, so a group's `p50_ms` is never null.
+
+`fallbacks` counts all requests that made more than one attempt, whether or not they succeeded. `fallbacks_answered` counts only those that ended with status `ok`. Subtract the second from the first to get the requests that tried a later target and still failed. With no requests, both values are zero.
+
+`cost_usd` adds the cost of every request in scope, billed (`upstream_cost`) or calculated by the gateway, and rounds the total to eight decimal places. Failed and unpriced requests add nothing. With nothing to add, the value is zero, never null. [Cost](/docs/reference/decisions#cost) explains how each request's cost is found.
+
+`unpriced` is the number of answered requests with `cost_basis: "unpriced"`. Billed requests are left out, including ones billed at zero. `output_unpriced` counts answered requests with `cost_includes_output: false`; any cost they report covers input only (see [Costs that leave out output](/docs/guides/cost#costs-that-leave-out-output)). Older entries with a null flag do not count. The provider and route groups carry their own copies of both counters, limited to that group. A counter with nothing to count is zero, never null.

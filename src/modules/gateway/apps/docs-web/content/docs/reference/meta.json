@@ -1,0 +1,12 @@
+{
+  "title": "API reference",
+  "pages": [
+    "decisions",
+    "models",
+    "providers",
+    "routes",
+    "observability",
+    "clients-settings",
+    "playground-health"
+  ]
+}

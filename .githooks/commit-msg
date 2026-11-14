@@ -1,0 +1,9 @@
+#!/bin/sh
+# Checks the commit message: Conventional Commits with the type's gitmoji after the colon.
+# Adds a missing emoji to the message. Skip the check once with `git commit --no-verify`.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "commit-msg: bun is not installed, so the commit message was not checked" >&2
+  exit 0
+fi
+root=$(git rev-parse --show-toplevel) || exit 1
+exec bun "$root/scripts/commit-msg.ts" --file "$1" --fix --allow-fixup

@@ -1,0 +1,38 @@
+{
+  "name": "dgateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/modules/gateway/apps/gateway-daemon/index.ts",
+    "test:e2e": "bun tests/e2e/compose.ts",
+    "format": "prettier --write src tests scripts",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "check": "prettier --check src tests scripts && bun run lint && tsc --noEmit && bun test",
+    "docs:build": "cd src/modules/gateway/apps/docs-web && bun run build",
+    "docs:check": "cd src/modules/gateway/apps/docs-web && bun run types:check",
+    "prepare": "if [ -e .git ] && command -v git >/dev/null 2>&1; then git config core.hooksPath .githooks || true; fi"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/bun": "^1.3.0",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.72.1"
+  },
+  "description": "Unified self-hosted API gateway for decision models",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BuddyLabsAI/dgateway.git"
+  },
+  "homepage": "https://github.com/BuddyLabsAI/dgateway#readme",
+  "bugs": {
+    "url": "https://github.com/BuddyLabsAI/dgateway/issues"
+  }
+}

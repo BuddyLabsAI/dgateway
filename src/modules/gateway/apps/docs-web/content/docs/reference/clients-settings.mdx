@@ -1,0 +1,38 @@
+---
+title: Client keys and settings
+description: Manage application access and gateway defaults.
+---
+
+Client keys identify the apps that call the public API. They are checked only when the `require_client_keys` setting is on. This page covers the admin endpoints that create and revoke those keys and change gateway settings. Send `Authorization: Bearer <ADMIN_TOKEN>` to every endpoint below. Requests and responses are JSON; timestamps use ISO-8601. A missing or incorrect admin token returns 401. Error bodies have an `error` object with `message`, `type`, and optionally `code`.
+
+## Tested example
+
+Run this against a development gateway with Bun and `ADMIN_TOKEN` available. `BASE_URL` defaults to `http://127.0.0.1:8790`. The script creates a key, lists keys and revokes the key. It then reads the settings and sends a patch that keeps the current default route. The full key appears only once, in the create response, so keep real output private.
+
+<include cwd lang="sh">
+  snippets/clients-settings.sh
+</include>
+
+## Client keys
+
+| Operation | Endpoint                        | Request             | Response                                                                                      |
+| --------- | ------------------------------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| List      | `GET /admin/api/clients`        | No body             | Array of `id`, `name`, `key_last4`, `created_at`, `last_used_at` objects.                     |
+| Create    | `POST /admin/api/clients`       | `{ "name": "..." }` | `id`, `name`, `key`, `key_last4`, `created_at`. The full `key` appears only in this response. |
+| Revoke    | `DELETE /admin/api/clients/:id` | No body             | `{ "ok": true }`                                                                              |
+
+## Settings
+
+Settings are gateway-wide defaults. `GET /admin/api/settings` returns the whole object. `PATCH /admin/api/settings` takes any subset of the fields, saves it and returns the whole updated object. Unknown fields and values of the wrong type return HTTP 400.
+
+| Setting               | Type             | Effect                                                                                                                  |
+| --------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `require_client_keys` | boolean          | When true, `POST /v1/decisions` and `GET /v1/models` need `Authorization: Bearer <client key>`.                         |
+| `capture_payloads`    | boolean          | When true, new log entries keep the request and response bodies. See [Security](/docs/guides/security).                 |
+| `default_route`       | string or `null` | Alias used when a decision omits `model`. It must match `[a-z0-9-]+`; the gateway does not check that the route exists. |
+
+A new database starts with these values:
+
+```json
+{ "require_client_keys": false, "capture_payloads": false, "default_route": "default" }
+```

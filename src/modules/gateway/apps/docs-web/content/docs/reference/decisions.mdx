@@ -1,0 +1,174 @@
+---
+title: Decisions
+description: 'POST /v1/decisions: requests, answers, usage, errors and cost.'
+---
+
+Send input and one or more questions to a route or directly to a provider. The gateway returns typed answers, the attempts it made and the cost information available for the answering attempt.
+
+## Tested examples
+
+Start the gateway and run these from the checkout. `BASE_URL` defaults to `http://127.0.0.1:8790`; supply `CLIENT_KEY` if client authentication is enabled. The seeded `default` route uses a deterministic mock, so it demonstrates the response format rather than model quality.
+
+### curl
+
+<include cwd lang="sh">
+  snippets/decisions.sh
+</include>
+
+### TypeScript client
+
+From the repository root, run `bun src/modules/gateway/apps/docs-web/snippets/decision-client.ts`. The sample imports the independent typed client from the checkout; applications elsewhere should import its package entry point. Construct `DecisionClient` with a base URL and an optional client key. A failed decision throws an Error with the gateway's message.
+
+<include cwd lang="ts">
+  snippets/decision-client.ts
+</include>
+
+## POST /v1/decisions
+
+Send JSON. If `settings.require_client_keys` is enabled, include `Authorization: Bearer <client key>`; otherwise authentication is not required.
+
+| Request field | Meaning                                                                                                                                               |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`       | Route alias. To skip routing and call one provider directly, send `<provider name>::<upstream model>`. Optional when `settings.default_route` is set. |
+| `input`       | Non-empty string to evaluate.                                                                                                                         |
+| `questions`   | Array of 1–400 questions. When a provider allows fewer, dgateway moves on to the route's next step.                                                   |
+
+Each question has a `type`:
+
+| Type        | Use it for                | You get                                             |
+| ----------- | ------------------------- | --------------------------------------------------- |
+| `choice`    | Sorting into 2–64 options | The top option and a probability for each one       |
+| `predicate` | A yes/no check            | The probability of yes                              |
+| `score`     | A rubric of 2–10 levels   | The expected level and a probability for each level |
+
+Each question also has a non-empty `name` unique in the request, a non-empty `instructions` string, and these fields for its type:
+
+| Type        | Additional fields                                                                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `choice`    | `choices`, an array of 2–64 objects with `value` (string, boolean or number) and `description` (string). The values must have distinct `String(value)` representations: for example, `true` and `"true"` conflict. |
+| `score`     | `levels`, an ordered array of 2–10 objects with string `description` and optional string `label`. Present labels must be unique.                                                                                   |
+| `predicate` | Neither `choices` nor `levels`.                                                                                                                                                                                    |
+
+Unknown fields at the request, question, choice or level layer are rejected with HTTP 400, as are duplicate level labels and invalid question shapes.
+
+A successful response has HTTP 200. `answers` and `usage` follow the Decisions API format. The gateway also adds the top-level fields `id`, `object`, `created` and `gateway`, and a `confidence_method` on each answer that has a confidence.
+
+| Response field | Meaning                                                                                                                                                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`           | Generated `dec_` identifier.                                                                                                                                                                                                                                                                                       |
+| `object`       | `"decision"`.                                                                                                                                                                                                                                                                                                      |
+| `created`      | Creation time in Unix seconds.                                                                                                                                                                                                                                                                                     |
+| `model`        | Requested model or route.                                                                                                                                                                                                                                                                                          |
+| `answers`      | Answers in the same order as the questions.                                                                                                                                                                                                                                                                        |
+| `usage`        | `input_tokens`, `output_tokens`, and `total_tokens`, or `null` if usage is unavailable. For chat, usage is null if any answered call omits it. Optional `input_tokens_details` and `output_tokens_details` include upstream-provided details such as `cached_tokens`, `cache_write_tokens` and `reasoning_tokens`. |
+| `gateway`      | Routing, attempt, confidence and cost metadata described below.                                                                                                                                                                                                                                                    |
+
+Each answer retains the question's `type` and `name`. A refusal for a question carries `refusal` text. Otherwise:
+
+- A `choice` answer gives the selected value in `choice` and an ordered `probabilities` array with one `{ "value", "probability" }` entry per option. Values retain their original types.
+- A `predicate` answer gives `probability`, the probability of true.
+- A `score` answer gives `score` and an ordered `probabilities` array. Each entry's `value` is a zero-based level index; its `label` is included when the level has one. The gateway computes the score as the sum of each index multiplied by its probability; it does not use an upstream-supplied score.
+
+For native choice and score answers, the gateway uses the upstream's confidence when it supplies one. Otherwise it computes `1 - H(p) / ln(K)`, where `H(p)` is the Shannon entropy of the probabilities and `K` is the number of options. An answer with confidence also has `confidence_method`. At gateway level, `confidence_method` is the shared method (`upstream`, `normalized-entropy`, `logprobs`, `sampling` or `json`), `mixed` if methods differ, or `none` when no answers carry confidence, as with native predicate-only responses or all refusals.
+
+The `gateway` object contains:
+
+| Field                                                      | Meaning                                                                                                                                                                                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `route`                                                    | Selected alias, or `null` for a direct provider request.                                                                                                                                                                        |
+| `provider`, `upstream_model`                               | Provider that answered and target model ID. A map-wire request does not necessarily send that model ID upstream.                                                                                                                |
+| `served_by`, `upstream_model_resolved`                     | Upstream's top-level `provider` and `model`, respectively. OpenRouter can identify the serving vendor and resolved dated model; OpenAI identifies its model. Each is `null` if absent, or for chat if answering calls disagree. |
+| `synthetic`                                                | `true` for an answer from a chat-wire attempt, `false` for a native response.                                                                                                                                                   |
+| `latency_ms`, `attempts`                                   | Total latency and ordered attempts. Each attempt has `provider`, `model`, `ok`, `latency_ms`, and an `error` on failure. Its model is the target ID, which may be omitted from a map-wire body.                                 |
+| `confidence_method`                                        | Summary of answer methods, as described above.                                                                                                                                                                                  |
+| `cost_usd`, `cost_basis`, `cost_includes_output`, `tokens` | Cost and token information for the answering attempt; see Cost below.                                                                                                                                                           |
+
+Token counts come from the upstream; for chat they are added up over all calls. `total_tokens` is the upstream's total when it gives one, and input plus output otherwise. If a native response reports input tokens but no output count, output counts as zero. [Upstream wires](/docs/reference/providers#upstream-wires) describes each upstream format.
+
+### Errors
+
+An error body looks like `{ "error": { "message": "...", "type": "...", "code": "..." } }`; `code` is not always present. Each type has one HTTP status: `invalid_request_error` (400), `authentication_error` (401), `not_found_error` (404), `server_error` (500), `upstream_error` (502) and `timeout_error` (504).
+
+When an upstream HTTP error carries a readable message, the gateway reports it as `upstream HTTP <status>: <message>`. It looks for the message in `error.message`, in a top-level `message` or `detail`, in an array of issues, or in a plain-text body. Before using it, the gateway removes known provider keys and text that looks like a credential or an account ID, and cuts the message to about 300 characters. The last failed attempt's message becomes the decision's error, and the same text goes to the log and, for a provider test, to `last_test.error`.
+
+## Cost
+
+Cost belongs to the attempt that answered. Failed attempts carry no cost, and entries in `attempts` have no cost field. An upstream may still charge for a failed attempt, so gateway totals can be lower than your bill. The [cost guide](/docs/guides/cost) explains the same rules with examples.
+
+For a native response, a valid non-negative `usage.cost` takes precedence over all configured prices, including target overrides, and is retained as reported with basis `upstream_cost`. For chat, the gateway uses a billed amount only when every answered call supplies a valid cost. It sums those amounts and rounds the sum to 12 decimal places. OpenRouter can report cost; the mock reports zero. The `tokens` field still records input tokens.
+
+Without a billed amount, the gateway looks up an input rate and an output rate separately, in USD per million tokens:
+
+1. Use the target's `price_per_m_input` or `price_per_m_output` when set (see [Routes](/docs/reference/routes)).
+2. Otherwise use the provider default in the table below.
+3. If no input rate exists, the answer is `unpriced` and `cost_usd` is `null`, even if an output rate exists. An unavailable output rate does not prevent input from being priced.
+
+| Provider kind                    | Default input and output rates                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `mock`                           | Both zero.                                                                                                             |
+| `openrouter`                     | Input and completion (`pricing.completion`) prices from its cached upstream catalog.                                   |
+| `openai`                         | Built-in rates for listed models (output is free on the native wires); otherwise the model hint's corresponding price. |
+| `systemone`, `openai-compatible` | The corresponding price in the provider's model hint. Without a hint or target input price, `systemone` is unpriced.   |
+
+The gateway decides whether a host is local by reading `base_url` only; it does no DNS lookup. These hosts are local: `localhost`, `127.0.0.0/8`, `::1`, `host.docker.internal`, `*.local`, `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`. Any other name counts as hosted, even if your DNS points it at a private address. This affects whether a SystemOne model is sent by default, not pricing. Local servers such as llama.cpp and Ollama are unpriced without a hint input price, target input price or billed amount.
+
+The built-in `openai` table has one model, `gpt-6-luna`. Per million tokens it charges $0.10 for input, $0.01 for cached input and $0.125 for cache writes. Output costs $0.50 per million, but only on the `chat` wire. The models endpoint shows the input rate as `default_price_per_m_input`. These figures are OpenAI's Standard rates for short prompts ([OpenAI pricing](https://developers.openai.com/api/docs/pricing)); the gateway never asks for another processing tier.
+
+The cache-write rate assumes OpenAI's default 30-minute cache lifetime. The gateway never asks for a different lifetime, but if you set a longer one in `extra_body`, OpenAI charges more than the gateway reports.
+
+The table also ignores Batch, Flex and Fast processing, regional surcharges and long prompts. A prompt over 272K input tokens is charged at double the input and cache rates by OpenAI, and `gpt-6-luna` output then costs $0.75 per million, not $0.50; the gateway still uses the short-prompt figures.
+
+### Token counts
+
+Input tokens come from upstream usage: `input_tokens`, or `prompt_tokens` from an older peer. A cost priced from those counts has basis `upstream_tokens`. If there is no usage, the gateway estimates the count and the basis is `estimated_tokens`. A native estimate counts the input, the question instructions and the choice or level descriptions. A chat estimate counts every message the gateway actually sent, so the repeated input counts each time. The estimate is the number of Unicode code points divided by four, rounded up. Every answered attempt fills in `tokens`, whether it is billed, priced or unpriced.
+
+Cache rates exist only in the built-in OpenAI table. A target price, a catalog price or a hint price charges every input token the same. When cache rates apply, `cached_tokens` and `cache_write_tokens` are parts of `input_tokens`: cached tokens use the cached rate, written tokens use the write rate, and the rest use the normal input rate. `tokens` still reports the full input count. A missing cache count is zero. If either count is not a non-negative integer, or the two add up to more than the input count, the gateway ignores both and charges all input at the normal rate.
+
+### Calculation
+
+A calculated cost is the input part plus the output part, divided by 1,000,000 and rounded once to eight decimal places.
+
+- Input part: `tokens * input price`. With cache rates it is `(tokens - cached - written) * input price + cached * cached rate + written * write rate`.
+- Output part: `output_tokens * output price`. It is zero when either the count or the rate is unknown, and when there are no output tokens.
+
+Output counts come from upstream usage, added up over chat calls. If the upstream counts reasoning tokens as output, as OpenAI does, they are charged as output. On the native `openai` and `map` wires, OpenAI's Decisions endpoint charges nothing for output ([OpenAI Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability)). A built-in model on those wires therefore has an output rate of 0, and its cost always covers output. The $0.50 output rate applies only on the `chat` wire, which calls Chat Completions. A target's `price_per_m_output` replaces either default.
+
+A zero input price uses `upstream_tokens` or `estimated_tokens`, just like any other input price. A billed amount is never recalculated.
+
+`cost_includes_output` tells you whether the cost covers output tokens. The flag has a value even when `cost_usd` is null. It is true for a billed amount or zero output tokens. It is also true when both the output count and rate are known, or whenever the output rate is zero.
+
+The flag is false in two cases: output tokens exist but have no rate, or the output count is unknown and the output rate is anything other than zero, including no rate at all. Then a calculated cost is for input alone, because the gateway does not invent an output rate.
+
+The flag is kept in the log, and statistics count answered requests where it is false as `output_unpriced` (see [Logs and statistics](/docs/reference/observability)).
+
+OpenRouter prices come from its model catalog. Listing an OpenRouter provider's models stores the catalog for 10 minutes, and pricing keeps using the stored entries after they expire. An OpenRouter chat-wire decision also fetches the catalog when none is stored; if that fetch fails, the decision goes on. A model with no catalog rate needs a target price or a billed cost to be priced.
+
+## Synthetic answer
+
+This score answer is an excerpt from a gateway test fixture:
+
+```json
+{
+  "type": "score",
+  "name": "urgency",
+  "confidence": 0.37856694371603516,
+  "confidence_method": "logprobs",
+  "score": 1.6888121836859735,
+  "probabilities": [
+    { "value": 0, "label": "low", "probability": 0.024404948200809042 },
+    { "value": 1, "label": "medium", "probability": 0.26237791991240844 },
+    { "value": 2, "label": "high", "probability": 0.7132171318867825 }
+  ]
+}
+```
+
+Synthetic answers include both `confidence` and `confidence_method`, including for predicates. `logprobs` derives confidence from label-token probabilities, `sampling` from coarse observed frequencies, and `json` from estimates stated by the model. They show how concentrated the probabilities are, not a guarantee of correctness or calibration; evaluate them against your own labelled examples. Different answer methods produce the aggregate `mixed`. See [synthetic decisions](/docs/guides/synthetic-decisions) for method order, compact JSON, transports and fallback rules.
+
+## Compatibility
+
+The response format changed on 2026-11-08, and the change is breaking. If you wrote code against the earlier format, update it as follows:
+
+- Each answer now names its question in `name`; the old field was `question`.
+- Choice answers give the selected value in `choice`; the old shared `value` field is gone. Predicates and scores no longer have a value field. To get a boolean from a predicate, test `probability >= 0.5`. For the most likely score level, take the entry with the highest probability.
+- `probabilities` is now the ordered array described above. It used to be a map keyed by value or label.
+- `usage` now has `input_tokens`, `output_tokens` and `total_tokens`. It used to have `prompt_tokens` and `total_tokens`.

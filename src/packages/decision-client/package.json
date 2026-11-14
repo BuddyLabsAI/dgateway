@@ -1,0 +1,8 @@
+{
+  "name": "@dgateway/decision-client",
+  "version": "0.1.0",
+  "description": "Typed client for the dgateway decisions API",
+  "type": "module",
+  "exports": "./index.ts",
+  "license": "MIT"
+}

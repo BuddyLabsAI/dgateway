@@ -1,0 +1,20 @@
+---
+title: TypeSafe and Jev
+description: Enable the disabled TypeSafe seed and route Jev decisions.
+---
+
+TypeSafe makes Jev, the first SystemOne model. SystemOne is the decision API that TypeSafe defined, and the gateway's `map` wire speaks it natively, with no chat model in between.
+
+A fresh database contains a disabled `typesafe` provider with no route. Its kind is `systemone`, its URL is `https://api.typesafe.ai`, its path is `/v1/systemone`, and it uses the `map` wire with `send_model: true`. The seed reads its key from the `TYPESAFE_API_KEY` environment variable. Responses from this provider have `gateway.synthetic: false`.
+
+To use it:
+
+1. Set `TYPESAFE_API_KEY` in the gateway host environment, as shown in `.env.example`, then restart the server or container.
+2. Enable TypeSafe in Providers and run the known-answer test. If neither a route nor a test model is specified, the test uses the first model hint.
+3. Create a route with a step that names TypeSafe as the provider and the Jev model you want.
+
+The seed and console preset include unverified model hints for `jev-1.14` (Jev 1.14) and `jev-1.13` (Jev 1.13). Each has a context size of 262144 and an input price of 0.042 USD per million tokens. The preset also mentions that TypeSafe's own API reference names only the aliases `jev-latest` and `jev-preview`. Check the model list and test your chosen model before relying on a hint. For pricing, a route price takes precedence over the hint, and an upstream bill takes precedence over both.
+
+For existing databases, migration 6 adds the provider once, unless a provider already uses that base URL (ignoring a trailing slash). It keeps existing settings, neither creates nor edits any route, and does not restore a seed deleted after the migration. If `typesafe` is already used for a different URL, the migration chooses the first free name in the sequence `typesafe-2`, `typesafe-3`, and so on.
+
+See [providers and wires](/docs/guides/providers), [provider management](/docs/reference/providers), and [cost tracking](/docs/guides/cost).

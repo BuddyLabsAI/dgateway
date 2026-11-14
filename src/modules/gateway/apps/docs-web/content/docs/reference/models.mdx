@@ -1,0 +1,24 @@
+---
+title: Models and public health
+description: List enabled route aliases and check public liveness.
+---
+
+`GET /v1/models` lists the route aliases that clients can send as `model`. `GET /healthz` is a small liveness check that needs no authentication.
+
+## Tested example
+
+The script prints the models list followed by public health as JSON. Set `CLIENT_KEY` if the gateway requires client keys. Set `BASE_URL` to use a gateway other than `http://127.0.0.1:8790`.
+
+<include cwd lang="sh">
+  snippets/models.sh
+</include>
+
+## GET /v1/models
+
+The response is an object with `object: "list"` and a `data` array. Each enabled route appears as a model with `id` (the alias), `object: "model"`, `owned_by: "dgateway"` and the route's `description`.
+
+Client keys work here as they do for `POST /v1/decisions`. With `require_client_keys` turned on, a request without a valid key gets HTTP 401 and error type `authentication_error`. The request log does not record models requests.
+
+The typed TypeScript client, `DecisionClient`, sends its configured key from both `models()` and `decide()`. When a call fails, either method throws an Error with the gateway's message, or with the HTTP status if the body has no message.
+
+### `GET /healthz` → `{ "ok": true }`

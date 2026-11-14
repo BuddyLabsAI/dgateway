@@ -1,0 +1,28 @@
+---
+title: Security and operations
+description: Protect administration, stored provider keys and captured payloads.
+---
+
+## Admin and client access
+
+One admin token controls the console and the admin API. The server refuses to start without `ADMIN_TOKEN`. Every `/admin/api` request requires `Authorization: Bearer <ADMIN_TOKEN>`. The public `/healthz` needs no authentication.
+
+Calls to `/v1/decisions` need no key until you turn on client keys in settings. Client keys are shown once, stored as SHA-256 hashes and can be revoked. When they are on, **both** `/v1/decisions` and `/v1/models` require a client bearer token. Provider keys and the admin token are distinct credentials.
+
+Compose binds only to localhost. The server binds `0.0.0.0` on port 8790 by default; `DGATEWAY_HOST` and `DGATEWAY_PORT` change those values. `HOST` and `PORT` still work when `DGATEWAY_HOST` and `DGATEWAY_PORT` are unset. `HOST` must be an IP address or `localhost` (including `0.0.0.0` and `::`). A machine name, which many shells export as `HOST`, is ignored with a startup warning. The server does not serve HTTPS. Before you open it beyond localhost, put it behind an HTTPS proxy or limit network access. The console is served on the same origin, so anyone who can reach the port and has the admin token can administer the gateway.
+
+## Provider credentials
+
+Providers can read a named environment variable at request time or store an encrypted key in SQLite. Stored keys use AES-256-GCM with a per-key scrypt-derived key from `GATEWAY_SECRET`. If the secret changes, dgateway cannot read the stored keys, so keep it stable and back it up securely. A provider response never returns the key. It names the key source, says whether an environment variable is present, and, for a stored key of 12 or more characters, gives its last four characters; a shorter stored key shows none of them.
+
+`GET /admin/api/health` reports only whether the secret is set, as `secret_configured`. While false, storing a key returns **400**, code `gateway_secret_missing`, and saves nothing. Match that code rather than the human message. Environment-variable keys still work.
+
+`auth_header` may name a custom credential header. Its value is redacted from traces and errors, just like standard credentials. Traces and upstream errors redact known provider keys, common credential and account identifier fields, and certain recognizable patterns. Redaction cannot recognize every secret or piece of personal data. Logprob tokens in chat traces (`logprobs.content[].token`, `top_logprobs[].token`) stay readable; fields named `token` outside those entries are redacted. An attempt error contains the failure message, limited to 300 characters. For an HTTP error, it can also include a readable upstream message, kept to about 300 characters.
+
+## Persistence and visibility
+
+Data lives in `DATA_DIR` (`./data` locally) or Compose volume `dgateway_gateway-data`. `docker compose down -v` deletes the volume. Maintain the encryption secret together with your operational backups.
+
+Logs keep no request or response bodies unless you turn on payload capture (`capture_payloads`). It then stores request and response bodies in the database. Known provider keys are redacted, and request fields with certain names are also redacted. This does not remove arbitrary sensitive content from inputs or answers, so enable it only when you are prepared to store that content. Logs and statistics require admin authentication. Failures record attempts; tests use the real decision path and create logs too. Model listings do not write request logs.
+
+For monitoring, `/healthz` reports `{ "ok": true }`; authenticated health adds uptime, version, secret presence, provider enabled state and key presence. A provider test records `last_test` but does not change health. For env keys `key_present` means the variable is set; it is true for stored keys and for providers that need no key.

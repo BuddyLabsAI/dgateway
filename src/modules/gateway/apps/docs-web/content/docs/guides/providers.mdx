@@ -1,0 +1,63 @@
+---
+title: Providers and wires
+description: Connect a provider and verify it with a known-answer check.
+---
+
+dgateway can call a model server on your own machine as well as hosted providers. The console has presets for OpenAI, OpenRouter, TypeSafe (whose model is Jev), Baseten, Liquid, Perplexity and DeepInfra, and for Ollama and vLLM on your machine. Chat presets for OpenAI, OpenRouter and any OpenAI-compatible server let chat models answer decision questions too.
+
+## Seeded providers and presets
+
+A new install starts with `mock`, `openai` and `openrouter` turned on. It also has providers that are turned off: `llamacpp`, which points to `http://host.docker.internal:8080` with the path `/v1/systemone`, for a server on your machine, and [`typesafe`](/docs/guides/typesafe) for TypeSafe's Jev models. SystemOne is the decision API that TypeSafe defined. A wire is the request and response format a provider uses; the `map` wire below speaks SystemOne.
+
+Local llama.cpp and Ollama servers have no default price. Add model hint prices or step prices to track their costs, unless the upstream reports a billed amount.
+
+Inside a container, `localhost` is the container itself. The `--add-host` line in the [Docker command](/docs/guides/getting-started) lets a container on Linux reach your machine as `host.docker.internal`; Docker Desktop has this name already. The model server must listen on an address the container can reach. To keep a task on your machine, give its route only local steps, as in [a local-only route](/docs/guides/routing#a-local-only-route).
+
+The mock is deterministic, using a hash of the input, except for the known-answer test below. It names itself `Mock` as the serving vendor (shown as `gateway.served_by`) and reports a billed cost of 0.
+
+A new install also has these providers that use the `chat` wire, turned off and with no routes: `openai-chat` (kind `openai`, `https://api.openai.com/v1` with path `/chat/completions`, key from `OPENAI_API_KEY`) and `openrouter-chat` (kind `openrouter`, `https://openrouter.ai` with path `/api/v1/chat/completions`, key from `OPENROUTER_API_KEY`). They serve chat models as [synthetic decisions](/docs/guides/synthetic-decisions) and sit next to the native `openai` and `openrouter` providers, which stay on their decision APIs. A chat provider and its native partner keep separate key settings that read the same environment variable.
+
+On an existing database, migration 7 adds each chat provider once, and skips it when a provider of that kind already uses the `chat` wire at the same base URL. A taken name gets a numbered suffix: `openai-chat-2`, `openrouter-chat-2` and so on. Once you delete a chat provider, it does not come back.
+
+The console's Add provider screen offers, in this order: **Any OpenAI-compatible chat model (synthetic)**, OpenAI, **OpenAI (chat-endpoint)**, OpenRouter, **OpenRouter (chat-endpoint)**, Ollama and vLLM on your machine, TypeSafe, Baseten, Liquid, Perplexity, DeepInfra, and custom OpenAI-compatible or SystemOne servers. Preset prices are dated **2026-11-08**. Some hints have unverified model IDs or prices; read the preset notes and test your chosen model. The TypeSafe, Baseten, Liquid, Perplexity and DeepInfra presets come from each vendor's public docs. Like the three chat presets, they show **Not verified yet** until a provider made from one passes a test with a live key. A recommended test model is saved as editable `test_model` under Advanced.
+
+OpenRouter's default path is `/api/alpha/decisions`; it accepts SystemOne's map wire and reports its serving vendor, resolved dated model and billed cost. Paths and wires remain editable.
+
+## Configure a connection
+
+Edit the provider's base URL, endpoint path, wire, timeout, limits, extra request fields, `send_model`, `auth_header`, `model_hints` and `test_model`. Keys may come from an environment variable read at request time or encrypted storage; see [security](/docs/guides/security).
+
+`auth_header: "authorization"` sends `Bearer <key>`; a custom name such as `x-api-key` sends the raw key. It is stored lowercase, cannot be `content-type` or `host`, and is redacted from traces and errors.
+
+Model hints list expected models, optional descriptions, context lengths and input and output prices in USD per million tokens. For SystemOne and OpenAI-compatible servers, hints lead the model list, and hint fields override matching catalog fields. When a provider has hints, the gateway waits up to 2 seconds (or the provider timeout, if shorter) for the upstream list; if that list fails, the hints are still shown. OpenRouter's catalog is cached for 10 minutes. [Provider management](/docs/reference/providers) documents all fields and defaults.
+
+## Request formats
+
+| Wire     | Request and response                                                                                                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openai` | Sends the public request with the target model and extra fields. Reads OpenAI-shaped answers and usage; older compatible answers using `question`, `value`, keyed probabilities and `prompt_tokens` are accepted too. |
+| `map`    | Sends input as `state`, generated question IDs (`q0`…), option IDs (`o0`…), `noul` predicates and an ordered list of score descriptions. Converts the response back to OpenAI's public shape.                         |
+
+On the map wire, `send_model` controls whether the model is sent. It defaults on for OpenRouter and hosted SystemOne, off for local SystemOne. The openai wire always sends it. Score criteria must be an ordered list, including for the mock. Unknown response fields are tolerated, but missing answers, invalid probabilities, wrong question/type and malformed token counts trigger fallback.
+
+The `chat` wire synthesizes decisions through ordered logprobs, sampling and JSON methods. It always sends the model, labels results with `gateway.synthetic: true`, and supports OpenAI, OpenRouter and compatible chat endpoints. See [synthetic decisions](/docs/guides/synthetic-decisions) for limits, calibration and transport fallback. In Add provider, the two chat-endpoint presets sit right after their native presets. Provider cards tag chat-wire providers **Synthetic** and decision APIs **Native**.
+
+To use chat models from OpenAI or OpenRouter, turn on `openai-chat` or `openrouter-chat` (or add one from its preset) and route to it. Do not switch the native `openai` or `openrouter` provider to the chat wire: that changes every route that uses it, and the native decision API is no longer reachable through it.
+
+## Test a provider
+
+The console's Test invokes `POST /admin/api/providers/:id/test`. It sends a short support ticket about a duplicated March invoice charge and asks which team should answer the ticket. The expected choice is `billing`. The mock returns it at probability **0.96** and divides the remaining probability evenly.
+
+The test picks its model from the first of these that exists:
+
+1. The model the test request names.
+2. The provider's model in the first enabled route that uses it, or in the first route that uses it if none is enabled.
+3. `test_model`.
+4. The first model hint.
+5. The cheapest priced catalog model, with ties broken by id.
+6. The first listed model.
+7. `server-configured`.
+
+The result reports `model`, `model_reason`, `model_route`, chosen answer and its probability, `matched`, the decision response or failure, and a redacted trace. `ok` says a decision answered; `matched` says the known answer matched. Tests use the normal decision path, bypass routes as `provider::model`, and are logged.
+
+When you read a provider, `last_test` holds the last success or failure, its start time, latency, model, reason and match result. It is `null` before testing. Invalid test requests run nothing and record nothing. Testing does not change health. The console's Models test uses the same ticket through a route via the playground.
